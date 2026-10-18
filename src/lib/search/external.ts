@@ -106,7 +106,7 @@ async function runAdapter(db: Db, adapter: SearchAdapter, src: { id: number; nam
     return { status: 'ok' as const, hits: r.hits };
   } catch (e) {
     const se = e instanceof SourceError ? e : new SourceError('network', (e as Error).message);
-    const status = se.kind === 'timeout' ? 'timeout' : se.kind === 'quota_exceeded' ? 'quota_exceeded' : se.kind === 'rate_limited' ? 'rate_limited' : 'error';
+    const status: SourceStatus = se.kind === 'timeout' ? 'timeout' : se.kind === 'quota_exceeded' ? 'quota_exceeded' : se.kind === 'rate_limited' ? 'rate_limited' : 'error';
     await logRequest(db, { sourceId: src.id, purpose: 'search', query, status, httpStatus: se.httpStatus, durationMs: Date.now() - started, error: se.message, jobId: req.jobId });
     log.warn('Fuente externa con error', { source: adapter.key, status, error: se.message });
     return { status, hits: [], message: se.message };
