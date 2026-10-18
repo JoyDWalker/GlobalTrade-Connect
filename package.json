@@ -1,0 +1,15 @@
+{
+  "name": "globaltrade-connect",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Directorio B2B de proveedores de café, chocolate y aceite",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning server/index.js",
+    "db:migrate": "node --disable-warning=ExperimentalWarning db/cli.js migrate",
+    "db:seed": "node --disable-warning=ExperimentalWarning db/cli.js seed",
+    "db:reset": "node --disable-warning=ExperimentalWarning db/cli.js reset"
+  }
+}
