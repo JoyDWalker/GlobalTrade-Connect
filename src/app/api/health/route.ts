@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getDb, one } from '@/lib/db';
 import { migrationStatus } from '@/lib/migrations';
 import { log } from '@/lib/logger';
+import { configProblems } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,14 @@ export async function GET() {
     env: process.env.APP_ENV ?? process.env.VERCEL_ENV ?? 'development',
     version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local',
   };
+  // Configuración: solo se informa del nombre de la variable y el motivo, nunca de su valor
+  const problems = configProblems();
+  if (problems.length) {
+    body.status = 'error';
+    body.config = { ok: false, problems };
+    return NextResponse.json(body, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+  }
+  body.config = { ok: true, auth: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY), storage: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) };
   try {
     const db = getDb();
     const r = await one<{ now: string }>(db, 'SELECT now()::text AS now');
@@ -28,7 +37,15 @@ export async function GET() {
   } catch (e) {
     log.error('Health check: base de datos no disponible', { error: e });
     body.status = 'error';
-    body.database = { ok: false };
+    // Motivo genérico (sin cadenas de conexión) para facilitar el diagnóstico
+    const msg = String((e as Error).message ?? '');
+    const hint = /password authentication|SASL|auth/i.test(msg) ? 'autenticación rechazada (revisa usuario/contraseña de DATABASE_URL)'
+      : /ENOTFOUND|getaddrinfo/i.test(msg) ? 'no se encuentra el servidor (revisa el host de DATABASE_URL)'
+        : /timeout|ETIMEDOUT/i.test(msg) ? 'tiempo de conexión agotado'
+          : /self.signed|certificate/i.test(msg) ? 'problema de certificado TLS (usa DATABASE_SSL=require)'
+            : /Tenant or user not found/i.test(msg) ? 'usuario del pooler incorrecto (debe ser postgres.<ref-del-proyecto>)'
+              : 'error de conexión';
+    body.database = { ok: false, reason: hint };
     return NextResponse.json(body, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
   return NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } });

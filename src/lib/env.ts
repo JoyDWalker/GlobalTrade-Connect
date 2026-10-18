@@ -61,6 +61,12 @@ export function env(): Env {
   return e;
 }
 
+/** Problemas de configuración (solo nombres de variables y motivo, nunca valores). Vacío si todo es correcto. */
+export function configProblems(): string[] {
+  try { env(); return []; }
+  catch (e) { return String((e as Error).message).replace(/^Configuración[^:]*:\s*/, '').split(/;\s*/).filter(Boolean); }
+}
+
 /** Solo para pruebas. */
 export function resetEnvCache() { cached = null; }
 
