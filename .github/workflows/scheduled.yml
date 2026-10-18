@@ -1,0 +1,31 @@
+# Tareas programadas de producción:
+#  - Cada 15 min: ejecuta el worker (/api/cron/worker) y comprueba /api/health.
+#    (Vercel Cron en el plan Hobby solo permite una ejecución diaria; esto la complementa.)
+#  - Si falla, GitHub notifica por email a los responsables del repositorio.
+# Secretos necesarios (Settings → Secrets and variables → Actions): PRODUCTION_URL, CRON_SECRET
+name: Tareas programadas
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  worker-and-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ vars.SCHEDULED_TASKS_ENABLED == 'true' }}
+    steps:
+      - name: Comprobar salud
+        run: |
+          code=$(curl -s -o health.json -w '%{http_code}' --max-time 30 "${{ secrets.PRODUCTION_URL }}/api/health")
+          cat health.json; echo
+          if [ "$code" != "200" ]; then echo "::error::La aplicación no responde correctamente (HTTP $code)"; exit 1; fi
+      - name: Ejecutar worker
+        run: |
+          code=$(curl -s -o worker.json -w '%{http_code}' --max-time 70 -X POST -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ secrets.PRODUCTION_URL }}/api/cron/worker")
+          head -c 2000 worker.json; echo
+          if [ "$code" != "200" ]; then echo "::error::El worker ha fallado (HTTP $code)"; exit 1; fi

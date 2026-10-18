@@ -52,7 +52,7 @@ export function parseQuery(raw: string, countryNames: Map<string, string> = new 
   const terms: string[] = [];
   for (const word of text.split(' ')) {
     if (!word) continue;
-    const t = TYPE_WORDS[word] || TYPE_WORDS[singular(word)];
+    const t = TYPE_WORDS[word] || TYPE_WORDS[word.replace(/s$/, '')] || TYPE_WORDS[word.replace(/es$/, '')];
     if (t) { if (!types.includes(t)) types.push(t); continue; }
     if (STOPWORDS.has(word) || word.length < 2) continue;
     const s = singular(word);

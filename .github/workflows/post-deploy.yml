@@ -1,0 +1,41 @@
+# Verificación tras cada despliegue de Vercel (Vercel publica el estado del despliegue en GitHub).
+# Si la nueva versión no responde en /api/health, el job falla y avisa: aplica el procedimiento
+# de reversión (Instant Rollback en Vercel) descrito en docs/OPERACIONES.md.
+name: Verificación de despliegue
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: ${{ github.event.deployment_status.state == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Comprobar /api/health de la versión desplegada
+        env:
+          URL: ${{ github.event.deployment_status.environment_url }}
+          ENVIRONMENT: ${{ github.event.deployment_status.environment }}
+        run: |
+          echo "Entorno: $ENVIRONMENT  URL: $URL"
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o health.json -w '%{http_code}' --max-time 30 "$URL/api/health" || true)
+            if [ "$code" = "200" ]; then cat health.json; echo; exit 0; fi
+            if [ "$code" = "401" ] && [ "$ENVIRONMENT" != "Production" ]; then echo "Preview protegida por Vercel Authentication: se omite"; exit 0; fi
+            echo "Intento $i: HTTP $code"; sleep 15
+          done
+          echo "::error::La nueva versión ($ENVIRONMENT) no supera la comprobación de salud"
+          exit 1
+      - name: Comprobar páginas principales
+        env:
+          URL: ${{ github.event.deployment_status.environment_url }}
+        run: |
+          for path in / /buscar?q=cafe /privacidad /fuentes; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL$path")
+            echo "$path → $code"
+            # Las previews protegidas por Vercel Authentication devuelven 401: no es un fallo de la app
+            if [ "$code" != "200" ] && [ "$code" != "401" ]; then exit 1; fi
+          done

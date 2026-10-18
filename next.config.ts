@@ -10,6 +10,7 @@ const securityHeaders = [
 
 const config: NextConfig = {
   poweredByHeader: false,
+  agentRules: false,
   serverExternalPackages: ['pg', '@electric-sql/pglite'],
   images: { remotePatterns: [{ protocol: 'https', hostname: '*.supabase.co' }] },
   async headers() {
