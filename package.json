@@ -1,15 +1,44 @@
 {
   "name": "globaltrade-connect",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Directorio B2B de proveedores de café, chocolate y aceite",
+  "description": "Plataforma B2B internacional para encontrar empresas, proveedores y oportunidades comerciales",
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning server/index.js",
-    "dev": "node --watch --disable-warning=ExperimentalWarning server/index.js",
-    "db:migrate": "node --disable-warning=ExperimentalWarning db/cli.js migrate",
-    "db:seed": "node --disable-warning=ExperimentalWarning db/cli.js seed",
-    "db:reset": "node --disable-warning=ExperimentalWarning db/cli.js reset"
+    "dev": "next dev",
+    "build": "node --import tsx scripts/prebuild.ts && next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "node --import tsx scripts/migrate.ts",
+    "db:seed": "node --import tsx scripts/seed.ts",
+    "db:local": "node --import tsx scripts/local-db.ts",
+    "admin:grant": "node --import tsx scripts/grant-admin.ts",
+    "worker": "node --import tsx scripts/worker.ts",
+    "check:env": "node --import tsx scripts/check-env.ts"
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.118.0",
+    "next": "16.4.2",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "@electric-sql/pglite-socket": "0.2.13",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
   }
 }
