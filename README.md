@@ -1,170 +1,153 @@
 # GlobalTrade Connect
 
-Directorio B2B para buscar **productores, exportadores, importadores y distribuidores** de café, chocolate y aceite, con foco en Brasil, España, Argentina, Colombia, Bélgica y Suiza.
+Plataforma B2B internacional para encontrar empresas, proveedores, fabricantes, importadores, exportadores, distribuidores y prestadores de servicios de cualquier sector y país.
 
-> Todos los datos de ejemplo son **ficticios**: emails y webs con el dominio reservado `.example`, teléfonos con el bloque `000 000`, y etiqueta **DEMO** en cada ficha.
+- **Búsqueda universal** en lenguaje natural («fabricantes de envases compostables en México») sobre la base de datos propia, con filtros combinables y, cuando hay pocos resultados, consulta en segundo plano a **fuentes externas autorizadas** (Brave Search API, Google Custom Search para cuentas existentes) sin bloquear la interfaz.
+- **Fichas con procedencia**: cada dato indica su fuente, fecha de recopilación, última comprobación y estado (*detectada*, *pendiente de revisión*, *contrastada*, *verificada*).
+- **Worker** con cola persistente en PostgreSQL: enriquecimiento desde la web oficial (respetando robots.txt), verificación en el registro mundial **GLEIF**, comprobación de enlaces, detección de duplicados, preparación de solicitudes y envío de emails.
+- Cuentas con **Supabase Auth**, roles (visitante, usuario, empresa, administrador) comprobados en el servidor, listas de favoritos, exportación CSV/Excel, panel de administración, auditoría y herramientas RGPD.
+
+| Documento | Contenido |
+|---|---|
+| [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md) | Supabase, Vercel, GitHub, variables, dominio propio, alternativa Railway |
+| [docs/OPERACIONES.md](docs/OPERACIONES.md) | Logs, monitorización, copias de seguridad, restauración, reversión, rotación de secretos |
+| [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | Arquitectura, modelo de datos, motor de búsqueda, fuentes, seguridad, RGPD y costes |
+| [docs/ESTADO.md](docs/ESTADO.md) | Informe del estado real del proyecto |
 
 ---
 
-## 1. Instalación y ejecución local
+## 1. Requisitos
 
-Requisitos: **Node.js 22.13 o superior** (usa el módulo SQLite integrado `node:sqlite`). No hay dependencias que instalar.
+- Node.js **22.12 o superior** y npm.
+- Git.
+- Para producción: cuentas en **GitHub**, **Supabase** y **Vercel** (o Railway). Opcional: Resend (email), Brave Search API.
+
+No hace falta Docker: para desarrollo local se incluye un PostgreSQL embebido (PGlite).
+
+## 2. Instalación local
 
 ```bash
-cp .env.example .env      # opcional: sin .env se usan los valores de .env.example
-npm start                 # http://localhost:3000
+git clone https://github.com/TU_USUARIO/globaltrade-connect.git
+cd globaltrade-connect
+npm install
+cp .env.example .env.local
 ```
 
-En el primer arranque se crean la base de datos (`data/globaltrade.db`), el esquema y los datos de ejemplo (24 empresas, 2 de ellas pendientes de revisión).
+Edita `.env.local` y rellena al menos `APP_SECRET` (32+ caracteres aleatorios):
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+### Base de datos local (sin Docker)
+
+En una terminal deja corriendo PostgreSQL embebido (datos en `./.pglite`):
+
+```bash
+npm run db:local
+```
+
+En otra terminal aplica las migraciones y carga los catálogos y las empresas de demostración (ficticias):
+
+```bash
+npm run db:migrate
+npm run db:seed -- --demo
+npm run dev
+```
+
+Abre http://localhost:3000. También puedes apuntar `DATABASE_URL` a cualquier PostgreSQL 15+ (por ejemplo, una base de desarrollo en Supabase con `DATABASE_SSL=require`).
+
+### Acceso en local
+
+- **Con Supabase** (recomendado): rellena `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY` de un proyecto de desarrollo, regístrate en `/registro` y concédete el rol de administrador (sección 6).
+- **Sin Supabase**: `DEV_FAKE_AUTH_EMAIL=tu@email` hace que la app actúe como ese usuario (debe existir en la tabla `profiles`). Solo funciona con `APP_ENV=development` y sin Supabase configurado; en cualquier otro caso se ignora.
+
+## 3. Comandos
 
 | Comando | Qué hace |
 |---|---|
-| `npm start` | Arranca el servidor |
-| `npm run dev` | Arranca con recarga automática al editar el servidor |
-| `npm run db:migrate` | Aplica migraciones pendientes de `db/migrations/` |
-| `npm run db:seed` | Carga datos de ejemplo (solo si la base está vacía) |
-| `npm run db:reset` | Borra la base de datos y los logos subidos, y vuelve a sembrar |
+| `npm run dev` | Servidor de desarrollo |
+| `npm run build` / `npm start` | Compilación y servidor de producción (el build aplica migraciones solo en producción) |
+| `npm test` | Pruebas automatizadas (PostgreSQL embebido, sin red) |
+| `npm run typecheck` | Comprobación de tipos |
+| `npm run db:local` | PostgreSQL local embebido en el puerto 54329 |
+| `npm run db:migrate [-- --dry-run]` | Aplica (o lista) migraciones pendientes |
+| `npm run db:seed [-- --demo]` | Catálogos; con `--demo`, 24 empresas ficticias (bloqueado en producción) |
+| `npm run admin:grant -- email [--revoke]` | Concede o retira el rol de administrador |
+| `npm run worker [-- --once]` | Worker independiente (Railway/VPS) |
+| `npm run check:env` | Valida la configuración sin mostrar secretos |
 
-**Cuentas de prueba**: el seed crea un administrador y un usuario de empresa con los emails y contraseñas definidos en `.env.example` (`ADMIN_*` y `COMPANY_DEMO_*`). Cámbialos en `.env` y ejecuta `npm run db:reset`.
+## 4. Variables de entorno
 
----
+Todas están en [.env.example](.env.example) con su descripción. Resumen:
 
-## 2. Funcionalidades
+| Variable | Obligatoria | Uso |
+|---|---|---|
+| `APP_ENV` | sí (Vercel la deduce) | `development`, `preview` o `production` |
+| `NEXT_PUBLIC_SITE_URL` | sí | URL pública canónica (enlaces en emails, sitemap, redirecciones de Auth) |
+| `DATABASE_URL` | sí | Cadena de conexión PostgreSQL. En Vercel + Supabase: *transaction pooler* (puerto 6543) |
+| `DATABASE_SSL` | sí en prod. | `require` o `verify-full` (con `DATABASE_CA_CERT`). `disable` solo en local |
+| `DB_POOL_MAX` | no | Conexiones por instancia (3-5 en serverless) |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | sí en prod. | Supabase Auth (clave pública) |
+| `SUPABASE_SERVICE_ROLE_KEY` | recomendada | Solo servidor: logos (Storage) y borrado de cuentas (RGPD) |
+| `BRAVE_SEARCH_API_KEY` | no | Búsqueda externa (de pago) |
+| `GOOGLE_CSE_API_KEY`, `GOOGLE_CSE_ENGINE_ID` | no | Solo cuentas existentes; Google anuncia su retirada el 1/1/2027 |
+| `EMAIL_PROVIDER`, `RESEND_API_KEY`, `EMAIL_FROM`, `ADMIN_NOTIFY_EMAIL` | recomendadas | Correo transaccional |
+| `APP_SECRET` | sí | Firma de formularios y anonimización de IPs |
+| `CRON_SECRET` | sí en prod. | Protege `/api/cron/worker` |
+| `ALERT_WEBHOOK_URL` | no | Alertas a Slack/Discord/Teams |
+| `LOG_LEVEL` | no | Nivel de logs |
 
-**Público (visitante)**
-- Portada con buscador, accesos rápidos (Café, Chocolate, Aceite, Exportadores, Importadores, Distribuidores), países, categorías, empresas destacadas y últimas añadidas.
-- Buscador avanzado con texto libre (sin tildes, en nombre, descripción, productos, códigos SA, ciudad…) y filtros combinables: categoría, subcategoría, país, región, ciudad, tipo de empresa, certificaciones (todas las elegidas), idiomas, capacidad de exportación mínima, pedido mínimo máximo, tipo de cliente y verificación.
-- Resultados con contador, filtros activos visibles, 5 ordenaciones, paginación, selección múltiple y exportación a **CSV o Excel** (seleccionadas o todo el resultado).
-- Ficha completa: datos comerciales, productos con código arancelario, certificaciones, mercados, condiciones, contactos (solo si la empresa autoriza mostrarlos), redes y empresas similares.
-- Botones: Contactar, Solicitar cotización, Guardar en favoritos, Copiar email, Compartir ficha, Reportar datos incorrectos.
-- Favoritos sin cuenta (en el navegador) que se sincronizan al iniciar sesión.
-- Formularios de contacto, «Solicitar proveedores», alta de empresa y derechos RGPD.
+La app valida la configuración al arrancar y se niega a funcionar en producción sin las variables críticas o con la base de datos sin cifrar. Ninguna clave privada usa el prefijo `NEXT_PUBLIC_`.
 
-**Empresa registrada**: ver estado de su ficha, editarla, gestionar las solicitudes recibidas, guardar leads.
+## 5. Base de datos y migraciones
 
-**Administrador** (`#/admin`):
-- Resumen con estadísticas por país, categoría, tipo y mes.
-- Empresas: crear, editar, eliminar, aprobar, rechazar (con motivo, se notifica por email), verificar y destacar.
-- Duplicados por nombre normalizado, email, dominio web e identificación fiscal.
-- Solicitudes de contacto, de proveedores, reportes de datos y peticiones RGPD con estados. La supresión RGPD anonimiza los datos asociados a un email.
-- Catálogos editables: categorías, subcategorías, productos, países, certificaciones, idiomas, tipos de empresa y de cliente. **Añadir un país o una categoría no requiere tocar código.**
-- Exportaciones a CSV/Excel de empresas, leads de contacto y solicitudes de proveedores.
-- Bandeja de emails: en local los emails no se envían, se registran aquí.
+- Esquema en [db/migrations](db/migrations): `0001_core.sql` (tablas, índices, restricciones) y `0002_security.sql` (RLS en todas las tablas, revocación de permisos a `anon`/`authenticated`, trigger de perfiles de Supabase Auth, índices de trigramas).
+- Cada migración se aplica una sola vez, en una transacción, con *checksum* (editar una ya aplicada es un error) y bloqueo para evitar ejecuciones simultáneas.
+- Las migraciones con `DROP`, `TRUNCATE`, `DELETE FROM` o `ALTER … DROP` se bloquean salvo que el archivo se llame `NNNN_nombre.destructive.sql` **y** se ejecute con `ALLOW_DESTRUCTIVE_MIGRATIONS=true`.
+- Para cambios nuevos crea `db/migrations/0003_descripcion.sql`. Usa la estrategia *expandir → migrar → contraer* para que la versión anterior siga funcionando durante el despliegue.
 
----
+## 6. Primer administrador (procedimiento seguro)
 
-## 3. Estructura de archivos
+No existe ninguna contraseña administrativa en el código ni forma de autopromocionarse desde la web.
 
-```
-├── package.json
-├── .env.example                 Configuración y credenciales de prueba
-├── db/
-│   ├── migrations/001_init.sql  Esquema relacional completo
-│   ├── seed-data.js             Catálogos y 24 empresas ficticias
-│   ├── seed.js                  Carga de datos de ejemplo
-│   └── cli.js                   migrate | seed | reset
-├── server/
-│   ├── index.js                 Servidor HTTP, CSRF, estáticos y SPA
-│   ├── http.js                  Router, JSON, ficheros, cabeceras de seguridad
-│   ├── config.js  db.js         Configuración, conexión y migraciones
-│   ├── auth.js                  Contraseñas (scrypt), sesiones en BD, roles
-│   ├── spam.js                  Honeypot, token con marca de tiempo, límite por IP
-│   ├── companies.js             Validación, guardado, búsqueda, fichas y exportación
-│   ├── export.js                CSV y Excel (.xlsx) sin dependencias
-│   ├── mailer.js                Notificaciones (bandeja de salida)
-│   ├── util.js                  Validador y utilidades
-│   └── routes/
-│       ├── public.js            API pública, cuenta, favoritos, formularios
-│       └── admin.js             API de administración
-├── public/
-│   ├── index.html
-│   ├── css/styles.css
-│   ├── img/                     Favicon y banderas
-│   └── js/
-│       ├── app.js               Router (hash) y cabecera
-│       ├── lib.js               Plantillas con escape, API, estado, UI
-│       └── views/               home, search, company, register, pages, account, admin
-├── data/                        Base de datos SQLite (se crea al arrancar)
-└── uploads/logos/               Logos subidos
+1. La persona se registra en `/registro` y confirma su email.
+2. Desde un equipo de confianza con la `DATABASE_URL` del entorno correspondiente (por ejemplo en `.env.local` temporal):
+   ```bash
+   npm run admin:grant -- persona@empresa.com
+   ```
+3. La acción queda en la auditoría. Para retirar el rol: `npm run admin:grant -- persona@empresa.com --revoke`. Después, los administradores pueden gestionar roles desde **Admin → Usuarios** (nunca el suyo propio).
+
+## 7. Pruebas
+
+```bash
+npm test
 ```
 
----
+Las pruebas usan PostgreSQL real embebido (PGlite) y fuentes externas simuladas: esquema y RLS, búsqueda en lenguaje natural, búsqueda externa (éxito, fallo, caché, cuotas, límites por usuario), cola de tareas (duplicados, reintentos, recuperación), deduplicación, borrado lógico, exportación CSV/Excel, validación, permisos de administración, aislamiento de listas entre usuarios, CSRF, secreto del cron, RGPD, robots.txt, SSRF, redacción de logs y validación del entorno de producción.
 
-## 4. Base de datos
+## 8. Despliegue
 
-Tablas principales (ver `db/migrations/001_init.sql`):
+Resumen (detalle en [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md)):
 
-| Tabla | Contenido |
-|---|---|
-| `companies` | Ficha de empresa (todos los campos pedidos + región, cobertura, NIF, estado de publicación, destacada, redes, condiciones, índice de búsqueda) |
-| `categories` | Árbol de categorías con `parent_id` (café › café verde…) |
-| `products` | Productos por subcategoría con `hs_code` opcional |
-| `countries` | Países con ISO, bandera y marca de prioritario |
-| `certifications`, `languages`, `business_types`, `client_types` | Catálogos |
-| `company_categories`, `company_products`, `company_certifications`, `company_languages`, `company_business_types`, `company_client_types`, `company_markets` | Relaciones N:M (los mercados distinguen exportación/importación) |
-| `contacts` | Personas de contacto con `consent_public` |
-| `inquiries` | Mensajes y solicitudes de cotización a empresas |
-| `supplier_requests` | Solicitudes de búsqueda de proveedores |
-| `users`, `sessions`, `favorites` | Cuentas (roles `company` y `admin`), sesiones y leads guardados |
-| `data_reports`, `privacy_requests`, `mail_outbox` | Reportes, peticiones RGPD y emails |
+1. Crea un proyecto en Supabase (región UE) y copia la URL, la clave pública, la *service role key* y la cadena del *transaction pooler*.
+2. Sube el repositorio a GitHub.
+3. Importa el repositorio en Vercel, define las variables de entorno de **Production** y **Preview** (bases de datos distintas) y despliega. El build de producción aplica las migraciones; si fallan, el despliegue se cancela y sigue activa la versión anterior.
+4. Configura Auth en Supabase (URL del sitio y redirecciones `/auth/callback`).
+5. Crea el primer administrador (sección 6).
+6. Activa las tareas programadas y las copias de seguridad en GitHub (secretos `PRODUCTION_URL`, `CRON_SECRET`, `PRODUCTION_DATABASE_URL`, `BACKUP_PASSPHRASE` y variables `SCHEDULED_TASKS_ENABLED=true`, `BACKUPS_ENABLED=true`).
 
-Para cambios de esquema, añade `db/migrations/002_lo-que-sea.sql`; se aplica solo al arrancar o con `npm run db:migrate`.
+Flujo de trabajo: ramas → pull request (CI + *preview* de Vercel) → `main` → producción → comprobación automática de `/api/health`.
 
----
+## 9. Tareas automáticas, logs y copias de seguridad
 
-## 5. API
+- **Worker**: `/api/cron/worker` se ejecuta cada 15 minutos (GitHub Actions) y una vez al día (Vercel Cron). Cada ejecución dura como máximo ~50 s y procesa la cola por lotes; las tareas interrumpidas se recuperan solas. También se puede lanzar desde **Admin → Tareas**.
+- **Logs**: JSON estructurado en la consola (Vercel → *Logs*), sin contraseñas, tokens, emails ni teléfonos.
+- **Salud**: `GET /api/health` (base de datos, migraciones y worker).
+- **Copias**: diarias, cifradas, con 30 días de retención (además de las propias de Supabase según el plan). Restauración en [docs/OPERACIONES.md](docs/OPERACIONES.md).
 
-Todas las rutas devuelven JSON. Las peticiones que modifican datos exigen `Content-Type: application/json` y la cabecera `X-Requested-With: fetch` (protección CSRF junto a la cookie `SameSite=Lax`).
+## 10. Limitaciones conocidas
 
-**Pública**
-
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET | `/api/meta` | Catálogos para filtros y formularios |
-| GET | `/api/home` | Destacadas, últimas y totales |
-| GET | `/api/companies?q=&category=&subcategory=&country=&region=&city=&type=&cert=&lang=&client=&verification=&minCapacity=&maxMinOrder=&sort=&page=&pageSize=` | Búsqueda (listas separadas por comas). `&format=csv\|xlsx` exporta |
-| POST | `/api/companies/export` | `{ ids, format }` → CSV/Excel de las seleccionadas |
-| GET | `/api/companies/:slug` | Ficha y empresas similares |
-| POST | `/api/companies/:slug/inquiries` | Contacto o cotización (notifica a la empresa) |
-| POST | `/api/companies/:slug/reports` | Reportar datos incorrectos |
-| POST | `/api/supplier-requests` | Solicitar proveedores (notifica al admin) |
-| POST | `/api/register` | Alta de empresa (+ cuenta opcional), queda pendiente de revisión |
-| POST | `/api/privacy-requests` | Derechos RGPD |
-| GET | `/api/form-token` | Token anti-spam para formularios |
-| POST | `/api/auth/login` · `/api/auth/logout` · GET `/api/auth/me` | Sesión |
-| GET/POST/DELETE | `/api/favorites[/:id]` | Favoritos |
-| GET | `/api/account` · PUT `/api/account/company` · PUT `/api/account/inquiries/:id` | Área de empresa |
-
-**Administración** (rol `admin`): `/api/admin/stats`, `/api/admin/companies[/:id]` (GET, POST, PUT, DELETE), `/api/admin/companies/:id/status`, `/api/admin/duplicates`, `/api/admin/inquiries`, `/api/admin/supplier-requests`, `/api/admin/reports`, `/api/admin/privacy-requests[/:id/execute]`, `/api/admin/outbox`, `/api/admin/taxonomy/:tipo[/:id]` y `/api/admin/export/:companies|inquiries|supplier-requests?format=csv|xlsx`.
-
----
-
-## 6. Seguridad, spam y RGPD
-
-- Contraseñas con scrypt y sal; sesiones aleatorias guardadas como hash; cookie `HttpOnly` + `SameSite=Lax` (+ `Secure` si `BASE_URL` es https).
-- Validación en servidor de todos los formularios y en cliente para la experiencia de uso.
-- Anti-spam: campo trampa oculto, token firmado con tiempo mínimo de 3 s, límite de envíos por IP y por formulario, máximo de enlaces por mensaje.
-- Cabeceras CSP, `X-Frame-Options`, `nosniff`; escape automático de todo el HTML generado; solo se enlazan URLs `http(s)`; CSV protegido frente a inyección de fórmulas.
-- RGPD: casillas de consentimiento no premarcadas, aviso de privacidad, publicación de datos de contacto solo con autorización, NIF nunca público, formulario de acceso/rectificación/supresión y ejecución de la supresión desde el panel.
-- Pendiente para producción: textos legales definitivos con tu asesor, CAPTCHA (Turnstile/hCaptcha) si llega spam real, recuperación de contraseña y verificación de email.
-
----
-
-## 7. Stack recomendado para crecer
-
-Esta versión prioriza que funcione con un solo comando (Node + SQLite, sin dependencias). La arquitectura (esquema relacional, API REST, catálogos configurables) se traslada sin cambios conceptuales. Para producción y crecimiento recomiendo:
-
-| Capa | Recomendación | Por qué |
-|---|---|---|
-| Frontend + BFF | **Next.js (App Router) + TypeScript + Tailwind** | SSR/SSG para SEO de las fichas (clave en un directorio), rutas por país/categoría indexables |
-| Backend | Route handlers de Next.js o **NestJS** si la API crece o la consumen terceros | Tipado de punta a punta, validación con Zod |
-| Base de datos | **PostgreSQL** (Neon, Supabase o RDS) con **Prisma** o Drizzle | El esquema SQL actual se traduce casi literalmente; migraciones versionadas |
-| Búsqueda | Postgres `unaccent` + `pg_trgm` al principio; **Meilisearch/Typesense** a partir de miles de fichas | Tolerancia a errores, facetas con contadores, sinónimos (AOVE ↔ aceite de oliva virgen extra) |
-| Autenticación | **Auth.js** o Clerk/Supabase Auth | Verificación de email, recuperación de contraseña, SSO |
-| Emails | **Resend**, Postmark o Amazon SES | Sustituye `deliver()` en `server/mailer.js` |
-| Ficheros | S3 / Cloudflare R2 para logos y catálogos PDF | |
-| Anti-spam | Cloudflare Turnstile | Sin fricción para el usuario |
-| Multi-idioma | `next-intl` (ES/EN/PT/FR/DE/NL) | El público es internacional |
-| Despliegue | Vercel + Postgres gestionado, o Docker en Railway/Render/Fly.io | |
-
-Siguientes funcionalidades naturales: planes de pago para empresas (Stripe), fichas con catálogos de producto y fichas técnicas, mensajería interna, alertas de nuevas empresas por filtro guardado e importación masiva por CSV desde el panel.
+- La cobertura de la búsqueda depende de las fuentes configuradas, sus permisos, cuotas y costes. Sin claves de búsqueda externa, la plataforma funciona solo con su base de datos propia.
+- Google Custom Search JSON API está cerrada a clientes nuevos y Google anuncia su retirada el 1 de enero de 2027; el adaptador se mantiene para cuentas existentes y Brave Search es la alternativa integrada.
+- Los textos legales son una base que debe revisar un profesional; los mecanismos RGPD implementados no equivalen por sí solos al cumplimiento normativo.

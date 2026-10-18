@@ -1,0 +1,47 @@
+# Integración continua: tipos, pruebas (PostgreSQL embebido) y compilación en cada push y pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: test
+      APP_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+      DATABASE_URL: postgres://unused@localhost/unused
+      DATABASE_SSL: disable
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tipos
+        run: npm run typecheck
+      - name: Pruebas
+        run: npm test
+      - name: Comprobar migraciones (sin destructivas pendientes)
+        run: node --import tsx -e "import('./src/lib/migrations.ts').then(m => { const d = m.loadMigrations().filter(x => x.destructive && !x.file.includes('.destructive.')); if (d.length) { console.error('Migraciones destructivas sin marcar:', d.map(x => x.file)); process.exit(1); } console.log('OK', m.loadMigrations().length, 'migraciones'); })"
+      - name: Compilación
+        run: npm run build
+        env:
+          APP_ENV: development
+          NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      - name: Buscar secretos en el código
+        run: |
+          if git grep -nE '(sk_live_|sb_secret_|service_role.{0,20}eyJ|re_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,})' -- ':!*.md' ':!.github'; then
+            echo "Posible secreto en el repositorio"; exit 1; fi

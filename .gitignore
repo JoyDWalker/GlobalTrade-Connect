@@ -1,4 +1,28 @@
+# dependencias y build
 node_modules/
-data/
-uploads/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# entorno y secretos: NUNCA subir
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# datos locales
+.pglite/
+backups/
+*.dump
+*.sql.gz
+*.gpg
+
+# varios
+.vercel/
+coverage/
+.DS_Store
+Thumbs.db
+npm-debug.log*
+.claude/
