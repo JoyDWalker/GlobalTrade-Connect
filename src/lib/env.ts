@@ -1,5 +1,6 @@
 // Variables de entorno validadas. Las privadas solo existen en el servidor.
 import { z } from 'zod';
+import { resolveEnv } from './env-resolve';
 
 const optional = z.string().trim().min(1).optional().catch(undefined);
 
@@ -45,14 +46,14 @@ let cached: Env | null = null;
 /** Devuelve el entorno validado; lanza un error claro si falta algo obligatorio. */
 export function env(): Env {
   if (cached) return cached;
-  const parsed = schema.safeParse({ ...process.env, APP_ENV: detectAppEnv() });
+  const parsed = schema.safeParse({ ...resolveEnv(process.env), APP_ENV: detectAppEnv() });
   if (!parsed.success) {
     const problems = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Configuración inválida: ${problems}`);
   }
   const e = parsed.data;
   if (e.APP_ENV === 'production') {
-    const missing = (['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY', 'CRON_SECRET'] as const).filter((k) => !e[k]);
+    const missing = (['NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_ANON_KEY'] as const).filter((k) => !e[k]);
     if (missing.length) throw new Error(`Configuración de producción incompleta: faltan ${missing.join(', ')}`);
     if (e.DATABASE_SSL === 'disable') throw new Error('En producción la conexión a la base de datos debe ir cifrada (DATABASE_SSL)');
     if (e.EMAIL_PROVIDER === 'resend' && !e.RESEND_API_KEY) throw new Error('EMAIL_PROVIDER=resend requiere RESEND_API_KEY');
@@ -61,8 +62,24 @@ export function env(): Env {
   return e;
 }
 
+/** Problemas de configuración (solo nombres de variables y motivo, nunca valores). Vacío si todo es correcto. */
+export function configProblems(): string[] {
+  try { env(); return []; }
+  catch (e) { return String((e as Error).message).replace(/^Configuración[^:]*:\s*/, '').split(/;\s*/).filter(Boolean); }
+}
+
 /** Solo para pruebas. */
 export function resetEnvCache() { cached = null; }
 
 export const isProduction = () => env().APP_ENV === 'production';
-export const authConfigured = () => Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+export const authConfigured = () => { const r = resolveEnv(process.env); return Boolean(r.NEXT_PUBLIC_SUPABASE_URL && r.NEXT_PUBLIC_SUPABASE_ANON_KEY); };
+
+/** Avisos no bloqueantes (sin valores) para /api/health. */
+export function configWarnings(): string[] {
+  const r = resolveEnv(process.env);
+  const w: string[] = [];
+  if (!r.CRON_SECRET) w.push('CRON_SECRET no definida: el worker programado está desactivado');
+  if (r.APP_SECRET_DERIVED) w.push('APP_SECRET derivada automáticamente: se recomienda definir una propia');
+  if (!r.SUPABASE_SERVICE_ROLE_KEY) w.push('SUPABASE_SERVICE_ROLE_KEY no definida: subida de logos y borrado de cuentas desactivados');
+  return w;
+}
