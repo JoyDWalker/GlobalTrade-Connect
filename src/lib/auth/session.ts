@@ -4,6 +4,7 @@ import type { Queryable } from '../db';
 import { getDb, many, one } from '../db';
 import { authConfigured, env } from '../env';
 import { log } from '../logger';
+import { audit } from '../audit';
 
 export type Role = 'user' | 'company' | 'admin';
 export interface SessionUser { id: string; email: string; full_name: string | null; role: Role; is_blocked: boolean; companyIds: string[] }
@@ -25,6 +26,23 @@ async function loadProfile(q: Queryable, id: string, email: string, fullName?: s
   }
   const companies = await many<{ company_id: string }>(q, 'SELECT company_id FROM company_members WHERE user_id = $1', [id]);
   return { ...p!, companyIds: companies.map((c) => c.company_id) };
+}
+
+/**
+ * Propietario de la aplicación: al iniciar sesión con este correo (ya confirmado por Supabase) recibe el rol de
+ * administrador automáticamente. Solo quien controla ese buzón puede confirmarlo. Se pueden añadir más con OWNER_EMAILS.
+ */
+const OWNER_EMAILS = ['joyd.walker2@gmail.com'];
+export const isOwnerEmail = (email: string) =>
+  [...OWNER_EMAILS, ...(process.env.OWNER_EMAILS ?? '').split(',')].map((e) => e.trim().toLowerCase()).filter(Boolean).includes(email.trim().toLowerCase());
+
+/** Concede el rol de administrador al propietario la primera vez que entra con el correo confirmado. */
+export async function ensureOwnerAdmin(q: Queryable, u: SessionUser, emailConfirmed: boolean): Promise<SessionUser> {
+  if (u.role === 'admin' || !emailConfirmed || !isOwnerEmail(u.email)) return u;
+  await q.query("UPDATE profiles SET role = 'admin' WHERE id = $1", [u.id]);
+  await audit(q, { id: u.id, email: u.email }, 'user.grant_admin_owner', { type: 'user', id: u.id }, { from: u.role, to: 'admin' });
+  log.info('Rol de administrador concedido al propietario', { userId: u.id });
+  return { ...u, role: 'admin' };
 }
 
 /**
@@ -51,7 +69,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
     const supabase = await createSupabaseServer();
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user?.email) return null;
-    const u = await loadProfile(getDb(), data.user.id, data.user.email, data.user.user_metadata?.full_name);
+    const u = await ensureOwnerAdmin(getDb(), await loadProfile(getDb(), data.user.id, data.user.email, data.user.user_metadata?.full_name), Boolean(data.user.email_confirmed_at));
     return u.is_blocked ? null : u;
   } catch (e) {
     log.warn('No se pudo validar la sesión', { error: e });
