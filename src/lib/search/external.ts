@@ -13,6 +13,7 @@ import type { CompanyHit, SearchAdapter } from '../sources/adapters';
 import { SEARCH_ADAPTERS } from '../sources/registry';
 import { SourceError } from '../sources/http';
 import { parseQuery } from './query';
+import { expandQuery, type AiCaller } from './expand';
 
 export type SourceStatus = 'ok' | 'cached' | 'error' | 'timeout' | 'quota_exceeded' | 'rate_limited' | 'disabled' | 'not_configured' | 'budget_exceeded';
 export interface ExternalOutcome {
@@ -21,6 +22,8 @@ export interface ExternalOutcome {
   sources: { key: string; name: string; status: SourceStatus; results: number; message?: string }[];
   newCompanies: number;
   items: CompanyCard[];
+  /** Cómo se amplió la búsqueda (sector, términos relacionados y consultas enviadas a los buscadores) */
+  expansion?: { origin: 'ai' | 'catalog'; sector: string | null; relatedTerms: string[]; queries: string[] } | null;
 }
 
 export interface ExternalRequest { query: string; country?: string | null; actorKey: string; isUser: boolean; jobId?: number | null; force?: boolean }
@@ -28,8 +31,10 @@ export interface ExternalRequest { query: string; country?: string | null; actor
 const cacheKey = (source: string, query: string, country?: string | null) =>
   crypto.createHash('sha256').update(`${source}|${normalize(query)}|${country ?? ''}`).digest('hex');
 
-async function spentTodayUsd(q: Queryable) {
-  const r = await one<{ usd: string }>(q, "SELECT coalesce(sum(cost_usd), 0) AS usd FROM external_requests WHERE created_at >= date_trunc('day', now())");
+export async function spentTodayUsd(q: Queryable) {
+  // APIs de búsqueda + IA
+  const r = await one<{ usd: string }>(q, `SELECT (SELECT coalesce(sum(cost_usd), 0) FROM external_requests WHERE created_at >= date_trunc('day', now()))
+    + (SELECT coalesce(sum(cost_usd), 0) FROM ai_requests WHERE created_at >= date_trunc('day', now())) AS usd`);
   return Number(r?.usd ?? 0);
 }
 
@@ -49,7 +54,7 @@ async function logRequest(q: Queryable, r: { sourceId: number; purpose: string; 
  * Inserta o actualiza una empresa detectada. Deduplica por dominio (y nombre+país como aviso).
  * Devuelve el id y si es nueva. Los datos quedan como "detectados", con su procedencia.
  */
-export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promise<{ id: string; created: boolean } | null> {
+export async function ingestHit(db: Db, h: CompanyHit, sourceId: number, { bulk = false }: { bulk?: boolean } = {}): Promise<{ id: string; created: boolean } | null> {
   if (!h.name || h.name.length < 2) return null;
   const srcUrl = h.url ?? ((h.raw as any)?.url as string | undefined) ?? null;
   return db.tx(async (q) => {
@@ -79,10 +84,12 @@ export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promis
     await refreshSearchText(q, id);
     // El snippet ayuda a encontrarla, pero no se presenta como descripción verificada
     if (h.snippet) await q.query("UPDATE companies SET search_text = search_text || ' ' || $2 WHERE id = $1", [id, normalize(h.snippet)]);
+    // En la importación masiva no se crea tarea de revisión por empresa y los contactos se buscan a ritmo controlado (fill_contacts)
+    if (bulk) return { id, created: true };
     await q.query(`INSERT INTO review_tasks (company_id, kind, priority, details, dedupe_key) VALUES ($1, 'new_detected', 20, $2, $3)
       ON CONFLICT (dedupe_key) WHERE status = 'open' AND dedupe_key IS NOT NULL DO NOTHING`, [id, JSON.stringify({ source: h.sourceKey, url: h.url }), `new_detected:${id}`]);
-    // Visitar su web para obtener email y teléfono corporativos publicados
-    if (h.url) await enqueue(q, 'enrich_company', { companyId: id }, { dedupeKey: `enrich:${id}`, priority: 60 });
+    // Obtener email y teléfono corporativos: visitando su web o, si no se conoce, buscándola por nombre
+    await enqueue(q, 'enrich_company', { companyId: id }, { dedupeKey: `enrich:${id}`, priority: 60 });
     return { id, created: true };
   });
 }
@@ -119,7 +126,19 @@ async function runAdapter(db: Db, adapter: SearchAdapter, src: { id: number; nam
   }
 }
 
-export async function runExternalSearch(db: Db, req: ExternalRequest, adapters: SearchAdapter[] = SEARCH_ADAPTERS): Promise<ExternalOutcome> {
+/** Ejecuta varias consultas en la misma fuente y une los resultados (sin repetir empresa). */
+async function runAdapterQueries(db: Db, adapter: SearchAdapter, src: Parameters<typeof runAdapter>[2], req: ExternalRequest, queries: string[], limit: number, timeoutMs: number, cacheHours: number) {
+  // Con cuota diaria propia, solo se lanzan en paralelo las consultas que caben en ella
+  const room = src.daily_quota == null ? queries.length : Math.max(1, src.daily_quota - (await usedToday(db, src.id)));
+  const runs = await Promise.all(queries.slice(0, room).map((q) => runAdapter(db, adapter, src, req, q, limit, timeoutMs, cacheHours)));
+  const seen = new Set<string>();
+  const hits = runs.flatMap((r) => r.hits).filter((h) => !seen.has(h.externalId) && seen.add(h.externalId));
+  const status: SourceStatus = runs.some((r) => r.status === 'ok') ? 'ok' : runs.some((r) => r.status === 'cached') ? 'cached' : runs[0].status;
+  const message = runs.find((r) => r.status === status && 'message' in r)?.message as string | undefined;
+  return { status, hits, message };
+}
+
+export async function runExternalSearch(db: Db, req: ExternalRequest, adapters: SearchAdapter[] = SEARCH_ADAPTERS, opts: { ai?: AiCaller } = {}): Promise<ExternalOutcome> {
   const empty = (status: ExternalOutcome['status'], reason: string, sources: ExternalOutcome['sources'] = []): ExternalOutcome => ({ status, reason, sources, newCompanies: 0, items: [] });
   try {
     const cfg = await getSetting(db, 'external_search');
@@ -139,9 +158,19 @@ export async function runExternalSearch(db: Db, req: ExternalRequest, adapters: 
     const tasks: Promise<{ src: (typeof srcRows)[number]; status: SourceStatus; hits: CompanyHit[]; message?: string }>[] = [];
     const overBudget = (await spentTodayUsd(db)) >= limits.daily_budget_usd;
     if (overBudget) alert('Presupuesto diario de APIs de búsqueda alcanzado', { budget: limits.daily_budget_usd }).catch(() => {});
-    // Para las APIs externas se envían los términos útiles + tipos (sin palabras vacías)
+    // Para las APIs externas se envían las palabras útiles sin reducir a raíz + tipos (sin palabras vacías)
     const countryName = country ? (await one<{ name: string }>(db, 'SELECT name FROM countries WHERE iso_code = $1', [country]))?.name : null;
-    const apiQuery = [...parsed.terms, ...parsed.types, countryName].filter(Boolean).join(' ') + (parsed.types.length ? '' : ' empresa');
+    const apiQuery = [...parsed.words, ...parsed.types, countryName].filter(Boolean).join(' ') + (parsed.types.length ? '' : ' empresa');
+
+    // Ampliación por producto/sector para los buscadores web: la consulta original + las generadas
+    const webAvailable = srcRows.some((src) => {
+      const a = adapters.find((x) => x.key === src.key);
+      return a && a.queryStyle !== 'plain' && src.enabled && a.isConfigured() && !(overBudget && Number(src.cost_per_1000_usd) > 0);
+    });
+    const expansion = webAvailable && cfg.max_queries > 1
+      ? await expandQuery(db, { product: parsed.phrase || parsed.words.join(' '), types: parsed.types, country, countryName: countryName ?? null, maxQueries: cfg.max_queries - 1, allowAi: cfg.ai_expansion && !overBudget }, { ai: opts.ai })
+      : null;
+    const webQueries = [apiQuery, ...(expansion?.queries ?? [])].filter((x, i, all) => all.findIndex((y) => normalize(y) === normalize(x)) === i).slice(0, Math.max(1, cfg.max_queries));
 
     for (const src of srcRows) {
       const adapter = adapters.find((a) => a.key === src.key);
@@ -149,8 +178,8 @@ export async function runExternalSearch(db: Db, req: ExternalRequest, adapters: 
       if (!src.enabled) { results.push({ key: src.key, name: src.name, status: 'disabled', results: 0 }); continue; }
       if (!adapter.isConfigured()) { results.push({ key: src.key, name: src.name, status: 'not_configured', results: 0 }); continue; }
       if (overBudget && Number(src.cost_per_1000_usd) > 0) { results.push({ key: src.key, name: src.name, status: 'budget_exceeded', results: 0 }); continue; }
-      const q = adapter.queryStyle === 'plain' ? parsed.phrase || parsed.words.join(' ') : apiQuery;
-      tasks.push(runAdapter(db, adapter, src, { ...req, country }, q, cfg.max_results_per_source, cfg.timeout_ms, cfg.cache_hours).then((r) => ({ src, ...r })));
+      const queries = adapter.queryStyle === 'plain' ? [parsed.phrase || parsed.words.join(' ')] : webQueries;
+      tasks.push(runAdapterQueries(db, adapter, src, { ...req, country }, queries, cfg.max_results_per_source, cfg.timeout_ms, cfg.cache_hours).then((r) => ({ src, ...r })));
     }
 
     // Tiempo máximo global: lo que no termine a tiempo se descarta (los registros quedan para la próxima vez)
@@ -186,6 +215,7 @@ export async function runExternalSearch(db: Db, req: ExternalRequest, adapters: 
     const items = (await companyCards(db, ids)).filter((c) => c.record_status === 'published' || c.record_status === 'detected');
     return {
       status, sources: results, newCompanies, items,
+      expansion: expansion ? { origin: expansion.origin, sector: expansion.sector, relatedTerms: expansion.relatedTerms, queries: webQueries } : null,
       reason: !attempted.length ? 'No hay fuentes externas configuradas. Se muestran solo los datos almacenados.' : status === 'failed' ? 'Las fuentes externas no están disponibles ahora. Se muestran los datos almacenados.' : undefined,
     };
   } catch (e) {

@@ -11,7 +11,7 @@ import { searchParamsFromUrl } from '@/lib/validation';
 import { getSessionUser } from '@/lib/auth/session';
 import { CompanyCard, Empty } from '@/components/ui';
 import { SelectionProvider } from '@/components/client';
-import { ExternalResults, ExportBar, Filters, SearchBar } from './search-client';
+import { ExternalOnDemand, ExternalResults, ExportBar, Filters, SearchBar } from './search-client';
 
 export const metadata: Metadata = { title: 'Buscar empresas' };
 
@@ -72,6 +72,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 </nav>
               )}
               {result.suggestExternal && <ExternalResults q={p.q} country={p.country[0] ?? null} searchId={result.searchId} />}
+              {!result.suggestExternal && result.canExternal && <ExternalOnDemand q={p.q} country={p.country[0] ?? null} searchId={result.searchId} />}
               {!result.suggestExternal && p.q && result.total > 0 && result.total < 6 && (
                 <p className="small muted" style={{ marginTop: 16 }}>¿No encuentras lo que buscas? <Link href={`/solicitar-proveedores?product=${encodeURIComponent(p.q)}`}>Pide ayuda a nuestro equipo</Link>.</p>
               )}

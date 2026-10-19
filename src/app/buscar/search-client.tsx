@@ -1,11 +1,11 @@
 'use client';
-import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type { Meta } from '@/lib/meta';
 import type { CompanyCard as Card } from '@/lib/services/companies';
 import { Icon } from '@/components/icons';
-import { apiFetch, download, FavButton, useSelection, useToast } from '@/components/client';
+import { apiFetch, download, useSelection, useToast } from '@/components/client';
+import { CompanyCard } from '@/components/ui';
 
 const LIST_KEYS = ['country', 'type', 'cert', 'lang', 'client', 'verification', 'source'];
 
@@ -78,11 +78,14 @@ export function Filters({ meta }: { meta: Meta }) {
     <aside className="filters" id="filters" aria-label="Filtros">
       <div className="filters-head"><h2>Filtros{active ? ` (${active})` : ''}</h2>
         <div className="row" style={{ gap: 4 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => push(Object.fromEntries([...LIST_KEYS, 'category', 'city', 'region', 'minCapacity', 'maxMinOrder', 'featured', 'detected'].map((k) => [k, null])))}>Limpiar</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => push(Object.fromEntries([...LIST_KEYS, 'category', 'city', 'region', 'minCapacity', 'maxMinOrder', 'featured', 'detected', 'contact'].map((k) => [k, null])))}>Limpiar</button>
           <button className="icon-btn filter-toggle" onClick={close} aria-label="Cerrar filtros"><Icon name="x" /></button>
         </div>
       </div>
       <div className="filters-body">
+        <div className="filter-group"><div className="body" style={{ paddingTop: 14 }}>
+          <label className="check"><input type="checkbox" checked={get('contact') === '1'} onChange={(e) => push({ contact: e.target.checked ? '1' : null })} /><span><strong>Solo empresas contactables</strong> (con teléfono o correo)</span></label>
+        </div></div>
         <details className="filter-group" open><summary>Sector / categoría</summary><div className="body">
           <label className="sr-only" htmlFor="f-cat">Sector</label>
           <select id="f-cat" className="input" value={get('category')} onChange={(e) => push({ category: e.target.value })}>
@@ -154,8 +157,20 @@ export function ExportBar({ total, exportQuery, pageIds }: { total: number; expo
   );
 }
 
-interface External { status: string; reason?: string; newCompanies: number; items: Card[]; sources: { key: string; name: string; status: string; results: number; message?: string }[] }
+interface External { status: string; reason?: string; newCompanies: number; items: Card[]; expansion?: { origin: 'ai' | 'catalog'; sector: string | null; relatedTerms: string[]; queries: string[] } | null; sources: { key: string; name: string; status: string; results: number; message?: string }[] }
 const SOURCE_STATUS: Record<string, string> = { ok: 'consultada', cached: 'desde caché', error: 'error', timeout: 'sin respuesta', quota_exceeded: 'cuota agotada', rate_limited: 'límite de peticiones', disabled: 'desactivada', not_configured: 'sin configurar', budget_exceeded: 'presupuesto agotado' };
+
+/** Para administradores: buscar en Internet aunque ya haya bastantes empresas guardadas. */
+export function ExternalOnDemand(props: { q: string; country: string | null; searchId: number | null }) {
+  const [on, setOn] = useState(false);
+  if (on) return <ExternalResults {...props} />;
+  return (
+    <div className="card card-pad ext-panel row" style={{ marginTop: 16 }}>
+      <span className="small muted" style={{ flex: 1, minWidth: 200 }}>¿Quieres más empresas? Busca «{props.q}» en Internet (consume de tu presupuesto de APIs).</span>
+      <button className="btn btn-primary btn-sm" onClick={() => setOn(true)}><Icon name="search" /> Buscar más en Internet</button>
+    </div>
+  );
+}
 
 /** Búsqueda en fuentes externas en segundo plano: no bloquea los resultados ya mostrados. */
 export function ExternalResults({ q, country, searchId }: { q: string; country: string | null; searchId: number | null }) {
@@ -178,16 +193,15 @@ export function ExternalResults({ q, country, searchId }: { q: string; country: 
       {state === 'done' && data && <>
         <div className="ext-status">{data.sources.map((s) => (
           <span key={s.key} className="badge" title={s.message}><span className={`status-dot ${s.status === 'ok' || s.status === 'cached' ? 'ok' : ['disabled', 'not_configured'].includes(s.status) ? '' : 'err'}`} />{s.name}: {SOURCE_STATUS[s.status] ?? s.status}{s.results ? ` · ${s.results}` : ''}</span>))}</div>
+        {data.expansion && <div className="notice small expansion" style={{ marginBottom: 12 }}>
+          <div><strong>Búsqueda ampliada{data.expansion.origin === 'ai' ? ' con IA' : ''}</strong>{data.expansion.sector ? <> · Sector: {data.expansion.sector}</> : null}</div>
+          {data.expansion.relatedTerms.length > 0 && <div className="tags" style={{ marginTop: 6 }}>{data.expansion.relatedTerms.map((t) => <span key={t} className="chip chip-outline">{t}</span>)}</div>}
+          <details style={{ marginTop: 6 }}><summary>Consultas enviadas a los buscadores ({data.expansion.queries.length})</summary><ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{data.expansion.queries.map((x) => <li key={x}>{x}</li>)}</ul></details>
+        </div>}
         {data.reason && <p className="muted small">{data.reason}</p>}
         {data.items.length > 0 && <>
           <div className="notice notice-info small" style={{ marginBottom: 12 }}>Estas empresas se han <strong>detectado automáticamente</strong> a partir de resultados públicos. Sus datos no están revisados: comprueba la información antes de hacer negocios.</div>
-          <div className="cards">{data.items.map((c) => (
-            <article key={c.id} className="card company-card">
-              <div className="top"><div className="meta"><h3><Link href={`/empresa/${c.slug}`}>{c.name}</Link></h3><div className="loc">{c.domain}{c.country_name ? ` · ${c.country_name}` : ''}</div></div></div>
-              {c.excerpt && <p className="excerpt">{c.excerpt}</p>}
-              <div className="tags"><span className="badge badge-detected">Detectada · sin revisar</span>{c.sources.map((s) => <span key={s} className="badge">{s}</span>)}</div>
-              <div className="foot"><Link className="btn btn-outline btn-sm" href={`/empresa/${c.slug}`}>Ver ficha</Link><span className="spacer" /><FavButton id={c.id} /></div>
-            </article>))}</div>
+          <div className="cards">{data.items.map((c) => <CompanyCard key={c.id} c={c} />)}</div>
         </>}
         {data.items.length === 0 && !data.reason && <p className="muted small">Las fuentes externas no han devuelto empresas nuevas para esta búsqueda.</p>}
       </>}

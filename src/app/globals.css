@@ -287,6 +287,8 @@ textarea.input { min-height: 110px; resize: vertical; }
 .product-list .hs { color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
 .contact-line { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: .92rem; word-break: break-word; }
 .contact-line:last-child { border-bottom: 0; }
+.card-contact { margin: 8px 0; }
+.card-contact .contact-line { padding: 4px 0; font-size: .85rem; }
 .contact-line svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
 .contact-line .grow { flex: 1; min-width: 0; }
 .notice { border-radius: var(--radius-sm); padding: 12px 14px; font-size: .9rem; background: var(--surface-2); border: 1px solid var(--line); }
@@ -403,3 +405,20 @@ pre.mail { white-space: pre-wrap; font-family: inherit; font-size: .85rem; backg
 
 h1 svg, h2 svg, h3 svg, .provenance svg { width: 1em; height: 1em; vertical-align: -0.12em; margin-right: 6px; flex: none; }
 .empty > svg { width: 42px; height: 42px; }
+
+/* Seguimiento comercial privado */
+.followup .field { margin-bottom: 8px; }
+.followup h2 .badge { vertical-align: middle; margin-left: 6px; }
+.link-btn { border: 0; background: none; padding: 0; color: var(--primary); cursor: pointer; text-decoration: underline; }
+.notes-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.notes-list li { padding: 8px 0; border-top: 1px dashed var(--line); }
+.note-body { white-space: pre-wrap; word-break: break-word; font-size: .9rem; margin-top: 2px; }
+.due { color: var(--danger); font-weight: 600; }
+
+/* Señales de existencia y contacto en las tarjetas */
+.signals { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: .78rem; color: var(--muted); margin: 4px 0 8px; }
+.signal.on { color: var(--ok); font-weight: 500; }
+.signals-score { font-weight: 600; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); }
+.signals-score.ok { background: var(--ok-50); color: var(--ok); border-color: #bfe3cf; }
+.signals-score.mid { background: var(--warn-50); color: var(--warn); border-color: #f2d9a9; }
+.signals-score.low { background: var(--surface-2); color: var(--muted); }

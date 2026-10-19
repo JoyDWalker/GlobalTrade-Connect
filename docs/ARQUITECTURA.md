@@ -24,7 +24,7 @@ Dependencias de producción: `next`, `react`, `react-dom`, `@supabase/ssr`, `@su
 Navegador ──HTTPS──▶ Vercel (Next.js)
                       ├─ Páginas SSR (búsqueda, fichas, cuenta, admin)
                       ├─ /api/*  (validación zod, permisos en servidor, CSRF por Origin, límites)
-                      ├─ /api/search/external  → adaptadores (Brave, Google CSE) con caché, cuotas y presupuesto
+                      ├─ /api/search/external  → expansión por producto/sector (IA o catálogo) + adaptadores (Serper, Brave, Google CSE, GLEIF, Wikidata) con caché, cuotas y presupuesto
                       └─ /api/cron/worker  ◀── GitHub Actions (15 min) / Vercel Cron (diario)
                               │                     └─ worker: web oficial (robots.txt), GLEIF, enlaces, duplicados, emails
                               ▼
@@ -55,6 +55,8 @@ Integridad: los leads usan `ON DELETE RESTRICT` (una empresa con solicitudes no 
 | Fuente | Tipo | Acceso | Coste aproximado* | Notas |
 |---|---|---|---|---|
 | Empresa (registro propio) | Declarado | — | 0 | Revisión antes de publicar |
+| Serper.dev | Buscador (resultados de Google) | Clave API | ~0,30-1 USD / 1.000 consultas según el plan | Verificar precio vigente |
+| Claude (Anthropic) | Expansión de búsquedas | Clave API | Céntimos por producto nuevo; se guarda en caché 30 días | Verificar precio vigente |
 | Brave Search API | Buscador | Clave API | ~5 USD / 1.000 consultas, con crédito mensual | Verificar precio vigente |
 | Google Custom Search JSON API | Buscador | Clave + CX | 100/día gratis; 5 USD / 1.000 (máx. 10.000/día) | Cerrada a clientes nuevos; retirada anunciada el 1/1/2027 |
 | GLEIF | Registro oficial (LEI) | Abierta | 0 (CC0) | Solo entidades con LEI |

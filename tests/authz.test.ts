@@ -127,3 +127,17 @@ describe('visibilidad pública', () => {
     expect(sel.status).toBe(404);
   });
 });
+
+describe('propietario de la aplicación', () => {
+  it('recibe el rol de administrador al entrar con su correo confirmado; nadie más', async () => {
+    const { ensureOwnerAdmin } = await import('@/lib/auth/session');
+    const db = await freshDb();
+    const owner = await makeUser(db, 'JoyD.Walker2@gmail.com');
+    expect((await ensureOwnerAdmin(db, owner, false)).role).toBe('user');          // correo sin confirmar: no
+    expect((await ensureOwnerAdmin(db, owner, true)).role).toBe('admin');
+    expect((await db.query('SELECT role FROM profiles WHERE id = $1', [owner.id])).rows[0].role).toBe('admin');
+    expect((await db.query("SELECT action FROM audit_log WHERE entity_id = $1", [owner.id])).rows[0].action).toBe('user.grant_admin_owner');
+    const other = await makeUser(db, 'otra@x.example');
+    expect((await ensureOwnerAdmin(db, other, true)).role).toBe('user');
+  });
+});

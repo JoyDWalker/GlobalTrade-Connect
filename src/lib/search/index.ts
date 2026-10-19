@@ -20,7 +20,10 @@ export async function performSearch(db: Db, p: SearchParams, viewer: { user: Ses
   const started = Date.now();
   const result = await searchCompanies(db, p);
   const cfg = await getSetting(db, 'external_search');
-  const suggestExternal = Boolean(p.q && p.page === 1 && cfg.enabled && result.total < cfg.min_internal_results && result.interpreted.terms.length && (await externalAvailable(db)));
+  const allowed = !cfg.admins_only || viewer.user?.role === 'admin';
+  // canExternal: el administrador puede pedir más resultados de fuera aunque haya bastantes guardados
+  const canExternal = Boolean(p.q && cfg.enabled && allowed && result.interpreted.terms.length && (await externalAvailable(db)));
+  const suggestExternal = canExternal && p.page === 1 && result.total < cfg.min_internal_results;
   let searchId: number | null = null;
   if (p.q || p.page === 1) {
     const row = await one<{ id: number }>(db, `INSERT INTO searches (query, query_normalized, filters, user_id, ip_hash, internal_results, external_status, duration_ms)
@@ -33,5 +36,5 @@ export async function performSearch(db: Db, p: SearchParams, viewer: { user: Ses
         FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, ord) ON CONFLICT DO NOTHING`, [searchId, result.items.map((c) => c.id)]);
     }
   }
-  return { ...result, searchId, suggestExternal };
+  return { ...result, searchId, suggestExternal, canExternal: canExternal && viewer.user?.role === 'admin' };
 }

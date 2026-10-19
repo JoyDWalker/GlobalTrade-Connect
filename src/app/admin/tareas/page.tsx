@@ -1,9 +1,42 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiFetch, Field, useToast } from '@/components/client';
 import { dt, Loading, useAdmin } from '../hooks';
 
-const TYPES: Record<string, string> = { enrich_company: 'Completar ficha desde su web', verify_registry: 'Consultar registro GLEIF', check_links: 'Comprobar webs', flag_stale: 'Programar actualización de fichas antiguas', detect_duplicates: 'Detectar duplicados', process_supplier_requests: 'Preparar candidatos para solicitudes', discovery: 'Descubrir empresas (búsqueda externa)', send_emails: 'Enviar emails pendientes', cleanup: 'Limpieza y retención' };
+const TYPES: Record<string, string> = { enrich_company: 'Completar ficha (web, teléfono y correo)', fill_contacts: 'Buscar teléfono y correo de empresas sin contacto', import_wikidata: 'Importar empresas reales (Wikidata)', verify_registry: 'Consultar registro GLEIF', check_links: 'Comprobar webs', flag_stale: 'Programar actualización de fichas antiguas', detect_duplicates: 'Detectar duplicados', process_supplier_requests: 'Preparar candidatos para solicitudes', discovery: 'Descubrir empresas (búsqueda externa)', send_emails: 'Enviar emails pendientes', cleanup: 'Limpieza y retención' };
+
+/** Importa empresas y busca contactos sin parar mientras la página esté abierta (no necesita cron). */
+function ContinuousImport() {
+  const [on, setOn] = useState(false);
+  const [last, setLast] = useState<{ total: number; contactable: number; processed: number; failed: number } | null>(null);
+  const [rounds, setRounds] = useState(0);
+  const [err, setErr] = useState<string | null>(null);
+  const active = useRef(false);
+  useEffect(() => {
+    active.current = on;
+    if (!on) return;
+    (async () => {
+      while (active.current) {
+        try { setLast(await apiFetch('/api/admin/run', { body: {} })); setRounds((n) => n + 1); setErr(null); }
+        catch (e) { setErr((e as Error).message); await new Promise((r) => setTimeout(r, 15_000)); }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    })();
+    return () => { active.current = false; };
+  }, [on]);
+  return (
+    <div className="card card-pad" style={{ marginBottom: 16 }}>
+      <h3>Importación continua</h3>
+      <p className="small muted" style={{ marginTop: 0 }}>Mientras esta página esté abierta, importa empresas reales de todos los países (Wikidata, gratuito) y busca su teléfono y correo, sin parar. Se detiene al cerrar la página o al llegar al tope de Ajustes.</p>
+      <div className="row" style={{ gap: 12 }}>
+        <button className={`btn ${on ? 'btn-outline' : 'btn-primary'}`} onClick={() => setOn(!on)}>{on ? 'Detener' : 'Iniciar importación continua'}</button>
+        {on && <span className="small"><span className="spinner" style={{ display: 'inline-block', width: 14, height: 14, verticalAlign: -2, marginRight: 6 }} />Trabajando… rondas: {rounds}</span>}
+      </div>
+      {last && <p className="small" style={{ marginBottom: 0 }}>Empresas en total: <strong>{last.total.toLocaleString('es-ES')}</strong> · con teléfono o correo: <strong>{last.contactable.toLocaleString('es-ES')}</strong> · última ronda: {last.processed} tareas{last.failed ? `, ${last.failed} con error` : ''}</p>}
+      {err && <p className="form-error small">{err} (se reintenta en unos segundos)</p>}
+    </div>
+  );
+}
 
 export default function Page() {
   const [status, setStatus] = useState('');
@@ -23,6 +56,7 @@ export default function Page() {
   return (
     <>
       <h1>Tareas y búsquedas</h1>
+      <ContinuousImport />
       <div className="card card-pad" style={{ marginBottom: 16 }}>
         <h3>Búsqueda manual en fuentes externas</h3>
         <form className="inline-form" onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); run('discovery', { query: String(f.get('q')), country: String(f.get('country') || '') || null, force: f.get('force') === 'on' }); }}>

@@ -154,6 +154,8 @@ export const searchParamsSchema = z.object({
   minCapacity: optNum(1e9),
   maxMinOrder: optNum(1e9),
   featured: z.boolean().default(false),
+  /** Solo empresas con teléfono o correo públicos */
+  contactable: z.boolean().default(false),
   includeDetected: z.boolean().default(true),
   sort: z.enum(['relevance', 'name', 'country', 'newest', 'verified']).default('relevance'),
   page: z.coerce.number().int().min(1).max(500).default(1),
@@ -174,7 +176,7 @@ export function searchParamsFromUrl(sp: URLSearchParams | Record<string, string 
     verification: list('verification').filter((v) => ['none', 'contrasted', 'verified'].includes(v)),
     status: list('status').filter((v) => ['detected', 'pending_review', 'published', 'hidden', 'rejected'].includes(v)),
     source: list('source'), minCapacity: get('minCapacity') || null, maxMinOrder: get('maxMinOrder') || null,
-    featured: get('featured') === '1', includeDetected: get('detected') !== '0',
+    featured: get('featured') === '1', contactable: get('contact') === '1', includeDetected: get('detected') !== '0',
     sort: ['relevance', 'name', 'country', 'newest', 'verified'].includes(get('sort')) ? get('sort') : 'relevance',
     page: get('page') || 1, pageSize: get('pageSize') || 12,
   });

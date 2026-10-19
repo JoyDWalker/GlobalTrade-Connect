@@ -8,6 +8,7 @@ import { toCSV, toXLSX, XLSX_TYPE } from '@/lib/export';
 import { exportColumns, exportRows, searchCompanies } from '@/lib/services/companies';
 import { isLeadKind, LEAD_KINDS } from '@/lib/services/admin-leads';
 import { searchParamsFromUrl } from '@/lib/validation';
+import { FOLLOWUP_STATUS, followupExportColumns, listFollowups } from '@/lib/services/followups';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -30,6 +31,15 @@ export const GET = api<{ entity: string }>(async ({ req, params, ipHash }) => {
     }
     rows = await exportRows(db, ids, env().NEXT_PUBLIC_SITE_URL, { privateView: true });
     columns = exportColumns(true);
+  } else if (params.entity === 'followups') {
+    const base = env().NEXT_PUBLIC_SITE_URL;
+    rows = [];
+    for (let page = 1; page <= 200; page++) {
+      const r = await listFollowups(db, { status: sp.get('status'), tag: sp.get('tag'), q: sp.get('q'), due: sp.get('due') === '1', page, pageSize: 100 });
+      rows.push(...r.items.map((x: any) => ({ ...x, status_label: FOLLOWUP_STATUS[x.status] ?? x.status, url: `${base}/empresa/${x.slug}` })));
+      if (page >= r.pages) break;
+    }
+    columns = followupExportColumns;
   } else if (isLeadKind(params.entity)) {
     const d = LEAD_KINDS[params.entity];
     rows = await many(db, `${d.sql} ORDER BY x.created_at DESC LIMIT 20000`);

@@ -1,6 +1,7 @@
 // Búsqueda en fuentes externas, invocada en segundo plano por la página de resultados.
 import { z } from 'zod';
-import { api, readJson } from '@/lib/api';
+import { api, HttpError, readJson } from '@/lib/api';
+import { getSetting } from '@/lib/settings';
 import { getDb } from '@/lib/db';
 import { getSessionUser } from '@/lib/auth/session';
 import { hit } from '@/lib/rate-limit';
@@ -16,6 +17,7 @@ export const POST = api(async ({ req, ipHash }) => {
   const db = getDb();
   const body = z.object({ q: z.string().trim().min(2).max(200), country: z.string().regex(/^[A-Z]{2}$/).optional().nullable(), searchId: z.coerce.number().int().positive().optional().nullable().catch(null) }).parse(await readJson(req));
   const user = await getSessionUser();
+  if ((await getSetting(db, 'external_search')).admins_only && user?.role !== 'admin') throw new HttpError(403, 'La búsqueda en fuentes externas está reservada a administradores');
   const actorKey = user ? `u:${user.id}` : `ip:${ipHash}`;
   await hit(db, `extburst:${actorKey}`, 30, 60);                     // ráfagas
   const r = await runExternalSearch(db, { query: body.q, country: body.country ?? null, actorKey, isUser: Boolean(user) });

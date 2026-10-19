@@ -65,7 +65,7 @@ Si una clave se expone (o de forma periódica):
 | `SUPABASE_SERVICE_ROLE_KEY` / claves API | Supabase → API Keys → crea una nueva / rota el JWT secret → actualiza Vercel → redespliega → revoca la anterior |
 | `APP_SECRET` | Genera uno nuevo y redespliega (invalida los formularios abiertos en ese momento) |
 | `CRON_SECRET` | Cambia el valor en Vercel y en GitHub a la vez |
-| `RESEND_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY` | Crea una clave nueva en el panel del proveedor, actualiza Vercel, redespliega y elimina la antigua |
+| `RESEND_API_KEY`, `SERPER_API_KEY`, `BRAVE_SEARCH_API_KEY`, `GOOGLE_CSE_API_KEY`, `ANTHROPIC_API_KEY` | Crea una clave nueva en el panel del proveedor, actualiza Vercel, redespliega y elimina la antigua |
 | `BACKUP_PASSPHRASE` | Cambia el secreto; las copias antiguas siguen necesitando la contraseña anterior (guárdala hasta que caduquen) |
 
 **Si un secreto llegó a subirse a Git**, eliminarlo del último commit no basta: sigue en el historial y en copias/forks. Revócalo inmediatamente en el proveedor y genera uno nuevo; después, si quieres limpiar el historial, usa `git filter-repo` o BFG y fuerza el push (coordínalo con quien tenga clones). El CI incluye una búsqueda básica de patrones de claves.

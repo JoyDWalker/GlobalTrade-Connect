@@ -222,12 +222,18 @@ export async function softDeleteCompany(q: Queryable, id: string, actorId: strin
 
 // ───────────────────────── Búsqueda interna ─────────────────────────
 
+/** La empresa tiene teléfono o correo públicos (propios o de un contacto publicable). */
+const CONTACTABLE_SQL = `(c.email IS NOT NULL OR c.phone IS NOT NULL OR EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id
+  AND (k.email IS NOT NULL OR k.phone IS NOT NULL) AND NOT k.hidden AND (NOT k.is_personal OR k.consent_public)))`;
+
 export interface CompanyCard {
   id: string; slug: string; name: string; logo_url: string | null; city: string | null; region: string | null;
   country_code: string | null; country_name: string | null; flag_url: string | null; company_types: string[]; type_names: string[];
   verification_level: string; record_status: string; is_featured: boolean; is_demo: boolean; origin: string; domain: string | null;
   excerpt: string | null; sectors: { name: string; slug: string }[]; certifications: string[]; sources: string[];
-  last_checked_at: string | null; created_at: string;
+  website: string | null; email: string | null; phone: string | null;
+  /** Señales de que la empresa existe y está activa */
+  sig_registry: boolean; sig_website: boolean; sig_maps: boolean; last_checked_at: string | null; created_at: string;
 }
 
 let countryNameCache: { at: number; map: Map<string, string> } | null = null;
@@ -287,6 +293,7 @@ export async function searchCompanies(q: Queryable, p: SearchParams, { admin = f
   if (p.minCapacity) where.push(`c.export_capacity_tons >= ${add(p.minCapacity)}`);
   if (p.maxMinOrder) where.push(`c.minimum_order_kg <= ${add(p.maxMinOrder)}`);
   if (p.featured) where.push('c.is_featured');
+  if (p.contactable) where.push(CONTACTABLE_SQL);
 
   const whereSql = where.join(' AND ');
   const whereParams = [...params];
@@ -295,7 +302,8 @@ export async function searchCompanies(q: Queryable, p: SearchParams, { admin = f
   const verifiedRank = "(CASE c.verification_level WHEN 'verified' THEN 0 WHEN 'contrasted' THEN 1 ELSE 2 END)";
   const statusRank = "(CASE c.record_status WHEN 'published' THEN 0 ELSE 1 END)";
   const ORDER: Record<SearchParams['sort'], string> = {
-    relevance: `(${matchExpr}) * 2 + ${nameBonus} DESC, ${statusRank}, ${verifiedRank}, c.is_featured DESC, c.name`,
+    // A igual coincidencia, primero las que se pueden contactar
+    relevance: `(${matchExpr}) * 2 + ${nameBonus} DESC, (CASE WHEN ${CONTACTABLE_SQL} THEN 0 ELSE 1 END), ${statusRank}, ${verifiedRank}, c.is_featured DESC, c.name`,
     name: 'lower(c.name)',
     country: 'co.name NULLS LAST, lower(c.name)',
     newest: 'c.created_at DESC, c.id',
@@ -318,6 +326,12 @@ export async function companyCards(q: Queryable, ids: string[]): Promise<Company
   if (!ids.length) return [];
   const rows = await many<CompanyCard>(q, `SELECT c.id, c.slug, c.name, c.logo_url, c.city, c.region, c.country_code, co.name AS country_name, co.flag_url,
       c.company_types, c.verification_level, c.record_status, c.is_featured, c.is_demo, c.origin, c.domain, c.last_checked_at, c.created_at,
+      c.website,
+      coalesce(c.email, (SELECT k.email FROM company_contacts k WHERE k.company_id = c.id AND k.email IS NOT NULL AND NOT k.hidden AND (NOT k.is_personal OR k.consent_public) ORDER BY k.is_primary DESC, k.id LIMIT 1)) AS email,
+      coalesce(c.phone, (SELECT k.phone FROM company_contacts k WHERE k.company_id = c.id AND k.phone IS NOT NULL AND NOT k.hidden AND (NOT k.is_personal OR k.consent_public) ORDER BY k.is_primary DESC, k.id LIMIT 1)) AS phone,
+      (c.lei IS NOT NULL OR c.verification_level <> 'none' OR EXISTS (SELECT 1 FROM verification_events v WHERE v.company_id = c.id AND v.kind = 'registry_lookup' AND v.result = 'match')) AS sig_registry,
+      c.website_status IN ('ok', 'redirect') AS sig_website,
+      EXISTS (SELECT 1 FROM data_provenance d WHERE d.company_id = c.id AND (d.source_url LIKE 'https://www.google.com/maps%' OR d.source_url LIKE 'https://www.openstreetmap.org/%')) AS sig_maps,
       left(coalesce(c.description, c.main_activity, (SELECT snippet FROM company_sources WHERE company_id = c.id ORDER BY last_seen_at DESC LIMIT 1)), 200) AS excerpt,
       coalesce((SELECT array_agg(b.name ORDER BY b.sort_order) FROM business_types b WHERE b.slug = ANY(c.company_types)), '{}') AS type_names,
       coalesce((SELECT json_agg(json_build_object('name', ca.name, 'slug', ca.slug) ORDER BY ca.sort_order)

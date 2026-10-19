@@ -20,6 +20,11 @@ const schema = z.object({
   GOOGLE_CSE_API_KEY: optional,
   GOOGLE_CSE_ENGINE_ID: optional,
   BRAVE_SEARCH_API_KEY: optional,
+  SERPER_API_KEY: optional,
+
+  // IA para ampliar las búsquedas (sector, términos relacionados, consultas)
+  ANTHROPIC_API_KEY: optional,
+  AI_MODEL: z.string().trim().min(1).default('claude-opus-5-5'),
 
   EMAIL_PROVIDER: z.enum(['log', 'resend']).default('log'),
   RESEND_API_KEY: optional,

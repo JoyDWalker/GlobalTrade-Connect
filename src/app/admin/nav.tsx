@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const ITEMS: [string, string][] = [
-  ['/admin', 'Resumen'], ['/admin/revision', 'Revisión'], ['/admin/empresas', 'Empresas'], ['/admin/solicitudes', 'Solicitudes'],
+  ['/admin', 'Resumen'], ['/admin/revision', 'Revisión'], ['/admin/seguimiento', 'Seguimiento'], ['/admin/empresas', 'Empresas'], ['/admin/solicitudes', 'Solicitudes'],
   ['/admin/usuarios', 'Usuarios'], ['/admin/tareas', 'Tareas y búsquedas'], ['/admin/fuentes', 'Fuentes y costes'], ['/admin/ajustes', 'Ajustes'],
   ['/admin/catalogos', 'Catálogos'], ['/admin/auditoria', 'Auditoría'], ['/admin/emails', 'Emails'],
 ];

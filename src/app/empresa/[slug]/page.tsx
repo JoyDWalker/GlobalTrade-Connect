@@ -8,6 +8,7 @@ import { safeUrl } from '@/lib/text';
 import { CompanyCard, Flag, fmtDate, Logo, StatusBadge, VerificationBadge } from '@/components/ui';
 import { Icon } from '@/components/icons';
 import { CompanyActions, ContactCard, ReportLink } from './company-client';
+import { FollowupPanel } from '@/components/followup';
 
 type Params = Promise<{ slug: string }>;
 
@@ -32,7 +33,7 @@ const KIND: Record<string, string> = { search_api: 'Buscador', registry: 'Regist
 export default async function CompanyPage({ params }: { params: Params }) {
   const r = await load((await params).slug);
   if (!r) notFound();
-  const { c } = r;
+  const { c, user } = r;
   const db = getDb();
   const related = await companyCards(db, (await many<{ id: string }>(db, `SELECT DISTINCT c2.id, c2.verification_level FROM companies c2 JOIN company_categories x ON x.company_id = c2.id
     WHERE c2.deleted_at IS NULL AND c2.record_status = 'published' AND c2.id <> $1 AND x.category_id IN (SELECT category_id FROM company_categories WHERE company_id = $1)
@@ -132,6 +133,7 @@ export default async function CompanyPage({ params }: { params: Params }) {
 
         <aside>
           <ContactCard company={{ id: c.id, slug: c.slug, name: c.name, products: c.offerings.map((o: any) => o.name) }} contacts={c.contacts} email={c.email} phone={c.phone} website={site} social={social} hasPrivate={c.has_private_contacts} detected={isDetected} />
+          {user?.role === 'admin' && <FollowupPanel companyId={c.id} name={c.name} city={c.city} country={c.country_name} />}
           <div className="card card-pad">
             <h3>Ubicación y cobertura</h3>
             <div className="contact-line"><Icon name="pin" /><span className="grow">{c.address ?? c.city ?? '—'}<br /><span className="muted small">{[c.postal_code, c.city, c.region, c.country_name].filter(Boolean).join(', ')}</span></span></div>
