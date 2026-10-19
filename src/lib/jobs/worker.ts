@@ -164,11 +164,13 @@ export const HANDLERS: Record<string, Handler> = {
       page = await bulkSource.page(cur.country_code, Number(cur.last_key), limit, Math.max(10_000, Math.min(40_000, deadline - Date.now() - 12_000)));
     } catch (e) {
       const se = e as SourceError;
+      // Límite de peticiones de la fuente: no es un fallo del país, se reintenta en la siguiente ronda
+      if (se.kind === 'rate_limited') return { country: cur.country_code, retryLater: se.message };
       // Tras 3 fallos seguidos (p. ej. un país demasiado grande para una consulta) se pasa al siguiente
       await db.query("UPDATE import_cursors SET failures = failures + 1, done = failures + 1 >= 3, last_error = $3, updated_at = now() WHERE source = 'wikidata' AND country_code = $1 AND last_key = $2",
         [cur.country_code, cur.last_key, se.message?.slice(0, 300) ?? 'error']);
       if (src) await db.query("INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, error) VALUES ($1,'search',$2,$3,$4,$5,$6)",
-        [src, `importación ${cur.country_code}`, se.kind === 'timeout' ? 'timeout' : se.kind === 'rate_limited' ? 'rate_limited' : 'error', se.httpStatus ?? null, Date.now() - started, se.message?.slice(0, 500) ?? null]);
+        [src, `importación ${cur.country_code}`, se.kind === 'timeout' ? 'timeout' : 'error', se.httpStatus ?? null, Date.now() - started, se.message?.slice(0, 500) ?? null]);
       return { country: cur.country_code, error: se.message };
     }
     let created = 0;
@@ -317,7 +319,8 @@ export async function scheduleRecurring(db: Db, now = new Date()) {
     await enqueueOncePerPeriod(db, 'process_supplier_requests', hour),
     await enqueueOncePerPeriod(db, 'check_links', hour),
     await enqueueOncePerPeriod(db, 'fill_contacts', hour),
-    await enqueueOncePerPeriod(db, 'import_wikidata', now.toISOString().slice(0, 15)),   // cada 10 min (en cada ejecución del worker)
+    // Cada 10 min, salvo que ya haya una tanda en cola o en curso
+    (await one(db, "SELECT 1 FROM jobs WHERE type = 'import_wikidata' AND status IN ('queued', 'running')")) ? null : await enqueueOncePerPeriod(db, 'import_wikidata', now.toISOString().slice(0, 15)),
     await enqueueOncePerPeriod(db, 'flag_stale', day),
     await enqueueOncePerPeriod(db, 'detect_duplicates', day),
     await enqueueOncePerPeriod(db, 'cleanup', day),

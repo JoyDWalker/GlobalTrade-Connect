@@ -92,3 +92,23 @@ describe('importación automática desde Wikidata', () => {
     expect(res.imported).toBeGreaterThanOrEqual(1);
   }, 60_000);
 });
+
+describe('consultas de importación', () => {
+  it('excluyen entidades que no son proveedores (y sus subtipos) y piden lo necesario', async () => {
+    const { qleverQuery, EXCLUDED_TYPES } = await import('@/lib/sources/wikidata-bulk');
+    const q = qleverQuery('ES', 42, 200);
+    expect(q).toContain('wdt:P297 "ES"');
+    expect(q).toContain('FILTER(?n > 42)');
+    expect(q).toContain('MINUS { ?item wdt:P31/wdt:P279* ?badType');
+    expect(EXCLUDED_TYPES).toContain('Q847017');           // club deportivo
+    expect(EXCLUDED_TYPES).not.toContain('Q48204');        // "asociación": se conservan las cooperativas
+  });
+
+  it('un límite de peticiones de la fuente no cuenta como fallo del país', async () => {
+    const db = await freshDb();
+    await db.query("UPDATE countries SET is_priority = (iso_code = 'DE')");
+    Object.assign(bulkSource, { page: vi.fn(async () => { throw new SourceError('rate_limited', 'QLever: límite de peticiones alcanzado', 429); }) });
+    expect(await run(db)).toEqual({ country: 'DE', retryLater: 'QLever: límite de peticiones alcanzado' });
+    expect((await db.query("SELECT done, failures FROM import_cursors WHERE country_code = 'DE'")).rows[0]).toEqual({ done: false, failures: 0 });
+  });
+});
