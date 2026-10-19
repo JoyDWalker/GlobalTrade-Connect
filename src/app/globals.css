@@ -287,6 +287,8 @@ textarea.input { min-height: 110px; resize: vertical; }
 .product-list .hs { color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
 .contact-line { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: .92rem; word-break: break-word; }
 .contact-line:last-child { border-bottom: 0; }
+.card-contact { margin: 8px 0; }
+.card-contact .contact-line { padding: 4px 0; font-size: .85rem; }
 .contact-line svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
 .contact-line .grow { flex: 1; min-width: 0; }
 .notice { border-radius: var(--radius-sm); padding: 12px 14px; font-size: .9rem; background: var(--surface-2); border: 1px solid var(--line); }

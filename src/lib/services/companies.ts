@@ -227,7 +227,7 @@ export interface CompanyCard {
   country_code: string | null; country_name: string | null; flag_url: string | null; company_types: string[]; type_names: string[];
   verification_level: string; record_status: string; is_featured: boolean; is_demo: boolean; origin: string; domain: string | null;
   excerpt: string | null; sectors: { name: string; slug: string }[]; certifications: string[]; sources: string[];
-  last_checked_at: string | null; created_at: string;
+  website: string | null; email: string | null; phone: string | null; last_checked_at: string | null; created_at: string;
 }
 
 let countryNameCache: { at: number; map: Map<string, string> } | null = null;
@@ -318,6 +318,9 @@ export async function companyCards(q: Queryable, ids: string[]): Promise<Company
   if (!ids.length) return [];
   const rows = await many<CompanyCard>(q, `SELECT c.id, c.slug, c.name, c.logo_url, c.city, c.region, c.country_code, co.name AS country_name, co.flag_url,
       c.company_types, c.verification_level, c.record_status, c.is_featured, c.is_demo, c.origin, c.domain, c.last_checked_at, c.created_at,
+      c.website,
+      coalesce(c.email, (SELECT k.email FROM company_contacts k WHERE k.company_id = c.id AND k.email IS NOT NULL AND NOT k.hidden AND (NOT k.is_personal OR k.consent_public) ORDER BY k.is_primary DESC, k.id LIMIT 1)) AS email,
+      coalesce(c.phone, (SELECT k.phone FROM company_contacts k WHERE k.company_id = c.id AND k.phone IS NOT NULL AND NOT k.hidden AND (NOT k.is_personal OR k.consent_public) ORDER BY k.is_primary DESC, k.id LIMIT 1)) AS phone,
       left(coalesce(c.description, c.main_activity, (SELECT snippet FROM company_sources WHERE company_id = c.id ORDER BY last_seen_at DESC LIMIT 1)), 200) AS excerpt,
       coalesce((SELECT array_agg(b.name ORDER BY b.sort_order) FROM business_types b WHERE b.slug = ANY(c.company_types)), '{}') AS type_names,
       coalesce((SELECT json_agg(json_build_object('name', ca.name, 'slug', ca.slug) ORDER BY ca.sort_order)

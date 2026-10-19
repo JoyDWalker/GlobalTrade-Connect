@@ -42,8 +42,10 @@ export function ContactCard({ company, contacts, email, phone, website, social, 
   return (
     <div className="card card-pad">
       <h2>Contacto</h2>
-      {email && <div className="contact-line"><Icon name="mail" /><a className="grow" href={`mailto:${email}`}>{email}</a><button className="icon-btn" aria-label="Copiar email" onClick={() => copy(email, toast, 'Email copiado')}><Icon name="copy" /></button></div>}
-      {phone && <div className="contact-line"><Icon name="phone" /><a className="grow" href={`tel:${phone.replace(/\s/g, '')}`}>{phone}</a></div>}
+      {email ? <div className="contact-line"><Icon name="mail" /><a className="grow" href={`mailto:${email}`}>{email}</a><button className="icon-btn" aria-label="Copiar email" onClick={() => copy(email, toast, 'Email copiado')}><Icon name="copy" /></button></div>
+        : <div className="contact-line"><Icon name="mail" /><span className="grow muted">Sin correo electrónico</span></div>}
+      {phone ? <div className="contact-line"><Icon name="phone" /><a className="grow" href={`tel:${phone.replace(/\s/g, '')}`}>{phone}</a></div>
+        : <div className="contact-line"><Icon name="phone" /><span className="grow muted">Sin teléfono</span></div>}
       {contacts.map((k) => (
         <div key={k.id} style={{ marginTop: 10 }}>
           {k.full_name && <div><strong>{k.full_name}</strong> <span className="muted small">{k.job_title ?? ''}</span></div>}
@@ -52,7 +54,8 @@ export function ContactCard({ company, contacts, email, phone, website, social, 
           {k.whatsapp && <div className="contact-line"><Icon name="whatsapp" /><a className="grow" href={`https://wa.me/${k.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer">WhatsApp {k.whatsapp}</a></div>}
         </div>))}
       {hasPrivate && <div className="notice small" style={{ margin: '8px 0' }}>Algunos contactos personales no se publican. Usa el formulario.</div>}
-      {website && <div className="contact-line"><Icon name="globe" /><a className="grow" href={website} target="_blank" rel="noopener noreferrer nofollow">{website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</a></div>}
+      {website ? <div className="contact-line"><Icon name="globe" /><a className="grow" href={website} target="_blank" rel="noopener noreferrer nofollow">{website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</a></div>
+        : <div className="contact-line"><Icon name="globe" /><span className="grow muted">Sin página web</span></div>}
       {social.length > 0 && <div className="row" style={{ gap: 6, marginTop: 10 }}>{social.map(([k, v]) => <a key={k} className="btn btn-outline btn-sm" href={v} target="_blank" rel="noopener noreferrer nofollow">{LABEL[k] ?? k}</a>)}</div>}
       {detected && <p className="provenance" style={{ marginTop: 8 }}>Datos públicos detectados en fuentes externas. Las solicitudes a empresas no verificadas las revisa nuestro equipo antes de reenviarlas.</p>}
       <button className="btn btn-primary" style={{ width: '100%', marginTop: 14 }} onClick={() => setOpen(true)}>Enviar mensaje</button>

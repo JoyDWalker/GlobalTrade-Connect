@@ -63,6 +63,13 @@ export function CompanyCard({ c, selectable = false }: { c: Card; selectable?: b
         {c.type_names.slice(0, 2).map((t) => <span key={t} className="chip chip-outline">{t}</span>)}
       </div>
       {c.excerpt && <p className="excerpt">{c.excerpt}</p>}
+      <div className="card-contact">
+        <div className="contact-line"><Icon name="globe" />{c.website && /^https?:\/\//i.test(c.website)
+          ? <a className="grow" href={c.website} target="_blank" rel="noopener noreferrer nofollow">{c.website.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '')}</a>
+          : <span className="grow muted">Sin página web</span>}</div>
+        <div className="contact-line"><Icon name="mail" />{c.email ? <a className="grow" href={`mailto:${c.email}`}>{c.email}</a> : <span className="grow muted">Sin correo electrónico</span>}</div>
+        <div className="contact-line"><Icon name="phone" />{c.phone ? <a className="grow" href={`tel:${c.phone.replace(/\s/g, '')}`}>{c.phone}</a> : <span className="grow muted">Sin teléfono</span>}</div>
+      </div>
       <div className="tags">
         {c.record_status === 'detected' ? <span className="badge badge-detected" title="Encontrada automáticamente en una fuente externa; datos no revisados">Detectada · sin revisar</span> : <VerificationBadge level={c.verification_level} />}
         {c.is_featured && <span className="badge badge-featured">Destacada</span>}
