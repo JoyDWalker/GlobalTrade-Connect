@@ -78,11 +78,14 @@ export function Filters({ meta }: { meta: Meta }) {
     <aside className="filters" id="filters" aria-label="Filtros">
       <div className="filters-head"><h2>Filtros{active ? ` (${active})` : ''}</h2>
         <div className="row" style={{ gap: 4 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => push(Object.fromEntries([...LIST_KEYS, 'category', 'city', 'region', 'minCapacity', 'maxMinOrder', 'featured', 'detected'].map((k) => [k, null])))}>Limpiar</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => push(Object.fromEntries([...LIST_KEYS, 'category', 'city', 'region', 'minCapacity', 'maxMinOrder', 'featured', 'detected', 'contact'].map((k) => [k, null])))}>Limpiar</button>
           <button className="icon-btn filter-toggle" onClick={close} aria-label="Cerrar filtros"><Icon name="x" /></button>
         </div>
       </div>
       <div className="filters-body">
+        <div className="filter-group"><div className="body" style={{ paddingTop: 14 }}>
+          <label className="check"><input type="checkbox" checked={get('contact') === '1'} onChange={(e) => push({ contact: e.target.checked ? '1' : null })} /><span><strong>Solo empresas contactables</strong> (con teléfono o correo)</span></label>
+        </div></div>
         <details className="filter-group" open><summary>Sector / categoría</summary><div className="body">
           <label className="sr-only" htmlFor="f-cat">Sector</label>
           <select id="f-cat" className="input" value={get('category')} onChange={(e) => push({ category: e.target.value })}>

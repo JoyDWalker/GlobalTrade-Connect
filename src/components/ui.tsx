@@ -47,6 +47,23 @@ export function StatusBadge({ status }: { status: string }) {
 
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 
+/** Señales de que la empresa existe y se puede contactar. */
+export function Signals({ c }: { c: Pick<Card, 'sig_registry' | 'sig_website' | 'sig_maps' | 'email' | 'phone'> }) {
+  const items: [boolean, string, string][] = [
+    [c.sig_registry, 'Registro oficial', 'Inscrita y activa en un registro oficial (GLEIF) o verificada por el equipo'],
+    [c.sig_website, 'Web activa', 'Su web responde (comprobada por el sistema)'],
+    [c.sig_maps, 'Google Maps', 'Tiene ficha de negocio en Google Maps'],
+    [Boolean(c.phone || c.email), 'Contactable', 'Tiene teléfono o correo públicos'],
+  ];
+  const n = items.filter(([ok]) => ok).length;
+  return (
+    <div className="signals" title={`${n} de ${items.length} señales`}>
+      <span className={`signals-score ${n >= 3 ? 'ok' : n === 2 ? 'mid' : 'low'}`}>{n >= 3 ? 'Comprobada' : n === 2 ? 'Probable' : 'Sin comprobar'}</span>
+      {items.map(([ok, label, title]) => <span key={label} className={`signal ${ok ? 'on' : ''}`} title={title}>{ok ? '✓' : '·'} {label}</span>)}
+    </div>
+  );
+}
+
 export function CompanyCard({ c, selectable = false }: { c: Card; selectable?: boolean }) {
   return (
     <article className="card company-card" data-id={c.id}>
@@ -70,6 +87,7 @@ export function CompanyCard({ c, selectable = false }: { c: Card; selectable?: b
         <div className="contact-line"><Icon name="mail" />{c.email ? <a className="grow" href={`mailto:${c.email}`}>{c.email}</a> : <span className="grow muted">Sin correo electrónico</span>}</div>
         <div className="contact-line"><Icon name="phone" />{c.phone ? <a className="grow" href={`tel:${c.phone.replace(/\s/g, '')}`}>{c.phone}</a> : <span className="grow muted">Sin teléfono</span>}</div>
       </div>
+      <Signals c={c} />
       <div className="tags">
         {c.record_status === 'detected' ? <span className="badge badge-detected" title="Encontrada automáticamente en una fuente externa; datos no revisados">Detectada · sin revisar</span> : <VerificationBadge level={c.verification_level} />}
         {c.is_featured && <span className="badge badge-featured">Destacada</span>}

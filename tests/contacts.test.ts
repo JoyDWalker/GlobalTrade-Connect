@@ -3,6 +3,8 @@ import { freshDb } from './helpers';
 import { contactSearch, HANDLERS } from '@/lib/jobs/worker';
 import { domainMatchesName, placeMatchesName, type FoundContacts } from '@/lib/sources/find-contacts';
 import type { SearchAdapter } from '@/lib/sources/adapters';
+import { companyCards, searchCompanies } from '@/lib/services/companies';
+import { searchParamsFromUrl } from '@/lib/validation';
 
 const original = { ...contactSearch };
 afterEach(() => Object.assign(contactSearch, original));
@@ -75,5 +77,22 @@ describe('contactos de empresas sin web', () => {
     Object.assign(contactSearch, { webAdapters: () => [fakeSerper] });
     expect(await HANDLERS.fill_contacts({ db, job: {} as any, deadline: Date.now() + 10000 })).toEqual({ queued: 1 });
     expect((await db.query("SELECT payload->>'companyId' AS id FROM jobs WHERE type = 'enrich_company'")).rows[0].id).toBe(id);
+  });
+
+  it('filtra las contactables, las ordena primero y calcula las señales', async () => {
+    const db = await freshDb();
+    const id = await gleifCompany(db);
+    await db.query("INSERT INTO companies (slug, name, city, country_code, phone, website, domain, website_status, record_status, verification_level, origin) VALUES ('kladdkakan-cafe', 'Kladdkakan Cafe Stockholm', 'Stockholm', 'SE', '+46 8 1', 'https://kladd.example', 'kladd.example', 'ok', 'detected', 'none', 'external')");
+    await db.query("UPDATE companies SET lei = '549300TEST', search_text = 'cafe kladdkakan' WHERE id = $1", [id]);
+    await db.query("UPDATE companies SET search_text = 'cafe kladdkakan' WHERE slug = 'kladdkakan-cafe'");
+    const all = await searchCompanies(db, searchParamsFromUrl(new URLSearchParams('q=kladdkakan')));
+    expect(all.items.map((c) => c.slug)).toEqual(['kladdkakan-cafe', 'cafe-kladdkakan']);   // la contactable primero
+    const only = await searchCompanies(db, searchParamsFromUrl(new URLSearchParams('q=kladdkakan&contact=1')));
+    expect(only.items.map((c) => c.slug)).toEqual(['kladdkakan-cafe']);
+
+    await db.query("INSERT INTO data_provenance (company_id, field, value, source_url, status) VALUES ($1, 'phone', '+46', 'https://www.google.com/maps?cid=1', 'detected')", [id]);
+    const [gleif, web] = await companyCards(db, [id, only.items[0].id]);
+    expect(gleif).toMatchObject({ sig_registry: true, sig_website: false, sig_maps: true });
+    expect(web).toMatchObject({ sig_registry: false, sig_website: true, sig_maps: false });
   });
 });

@@ -414,3 +414,11 @@ h1 svg, h2 svg, h3 svg, .provenance svg { width: 1em; height: 1em; vertical-alig
 .notes-list li { padding: 8px 0; border-top: 1px dashed var(--line); }
 .note-body { white-space: pre-wrap; word-break: break-word; font-size: .9rem; margin-top: 2px; }
 .due { color: var(--danger); font-weight: 600; }
+
+/* Señales de existencia y contacto en las tarjetas */
+.signals { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: .78rem; color: var(--muted); margin: 4px 0 8px; }
+.signal.on { color: var(--ok); font-weight: 500; }
+.signals-score { font-weight: 600; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); }
+.signals-score.ok { background: var(--ok-50); color: var(--ok); border-color: #bfe3cf; }
+.signals-score.mid { background: var(--warn-50); color: var(--warn); border-color: #f2d9a9; }
+.signals-score.low { background: var(--surface-2); color: var(--muted); }
