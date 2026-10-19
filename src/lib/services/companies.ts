@@ -277,7 +277,8 @@ export async function searchCompanies(q: Queryable, p: SearchParams, { admin = f
   if (countries.length) where.push(`c.country_code = ANY(${add(countries)}::text[])`);
   if (p.region) where.push(`lower(c.region) = lower(${add(p.region)})`);
   if (p.city) where.push(`lower(c.city) LIKE lower(${add(`%${p.city}%`)})`);
-  if (types.length) where.push(`c.company_types && ${add(types)}::text[]`);
+  // Tipo deducido del texto ("fabricantes de…"): también incluye fichas aún sin tipo asignado (p. ej. detectadas)
+  if (types.length) where.push(p.type.length ? `c.company_types && ${add(types)}::text[]` : `(c.company_types && ${add(types)}::text[] OR cardinality(c.company_types) = 0)`);
   for (const cert of p.cert) where.push(`EXISTS (SELECT 1 FROM company_certifications x JOIN certifications ce ON ce.id = x.certification_id WHERE x.company_id = c.id AND ce.slug = ${add(cert)})`);
   for (const lang of p.lang) where.push(`EXISTS (SELECT 1 FROM company_languages x WHERE x.company_id = c.id AND x.language_code = ${add(lang)})`);
   if (p.client.length) where.push(`EXISTS (SELECT 1 FROM company_client_types x WHERE x.company_id = c.id AND x.client_type = ANY(${add(p.client)}::text[]))`);
