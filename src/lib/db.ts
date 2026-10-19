@@ -20,6 +20,9 @@ export async function one<T = Record<string, any>>(q: Queryable, text: string, p
   return (await q.query<T>(text, params)).rows[0] ?? null;
 }
 
+// bigint (int8) como número, igual que PGlite: los identificadores y recuentos caben de sobra en 2^53
+pg.types.setTypeParser(20, (v) => Number(v));
+
 function sslConfig(): pg.PoolConfig['ssl'] {
   const e = env();
   if (e.DATABASE_SSL === 'disable') return false;

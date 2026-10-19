@@ -11,7 +11,7 @@ export const maxDuration = 30;
 
 export const POST = api(async ({ req, ipHash }) => {
   const db = getDb();
-  const body = z.object({ q: z.string().trim().min(2).max(200), country: z.string().regex(/^[A-Z]{2}$/).optional().nullable(), searchId: z.number().int().optional().nullable() }).parse(await readJson(req));
+  const body = z.object({ q: z.string().trim().min(2).max(200), country: z.string().regex(/^[A-Z]{2}$/).optional().nullable(), searchId: z.coerce.number().int().positive().optional().nullable().catch(null) }).parse(await readJson(req));
   const user = await getSessionUser();
   const actorKey = user ? `u:${user.id}` : `ip:${ipHash}`;
   await hit(db, `extburst:${actorKey}`, 5, 60);                      // ráfagas
