@@ -40,6 +40,9 @@ describe('búsqueda externa', () => {
     expect(r2.sources[0].status).toBe('cached');
     expect(r2.newCompanies).toBe(0);
     expect((await db.query('SELECT count(*)::int AS n FROM companies')).rows[0].n).toBe(1);
+    // La empresa guardada aparece después en la búsqueda interna aunque la consulta indique un tipo
+    const internal = await searchCompanies(db, searchParamsFromUrl(new URLSearchParams({ q: query })));
+    expect(internal.items.map((c) => c.domain)).toContain('envases-norte.example');
   });
 
   it('si la fuente falla, no lanza y los datos guardados siguen disponibles', async () => {
