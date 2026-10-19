@@ -34,9 +34,14 @@ describe('búsqueda externa', () => {
     const job = await db.query('SELECT type FROM jobs WHERE dedupe_key = $1', [`enrich:${r.items[0].id}`]);
     expect(job.rows[0].type).toBe('enrich_company');
 
+    // La búsqueda se amplía con varias consultas (sin IA: con el catálogo de sectores)
+    const calls = search.mock.calls.length;
+    expect(calls).toBeGreaterThan(1);
+    expect(r.expansion?.origin).toBe('catalog');
+    expect(r.expansion?.queries.length).toBe(calls);
     // Segunda vez: caché, sin llamar a la API y sin duplicar la empresa
     const r2 = await runExternalSearch(db, { query, actorKey: 'ip1', isUser: false }, [fakeAdapter('brave', search)]);
-    expect(search).toHaveBeenCalledTimes(1);
+    expect(search).toHaveBeenCalledTimes(calls);
     expect(r2.sources[0].status).toBe('cached');
     expect(r2.newCompanies).toBe(0);
     expect((await db.query('SELECT count(*)::int AS n FROM companies')).rows[0].n).toBe(1);

@@ -111,6 +111,9 @@ export const sources = [
   { key: 'google_cse', name: 'Google Custom Search JSON API', kind: 'search_api', reliability: 40, cost: 5, quota: 100,
     base_url: 'https://www.googleapis.com/customsearch/v1', terms_url: 'https://developers.google.com/custom-search/v1/overview',
     notes: 'Cerrada a nuevos clientes; Google anuncia su retirada el 1 de enero de 2027. 100 consultas/día gratis, 5 USD/1.000 adicionales (máx. 10.000/día) para clientes existentes.' },
+  { key: 'serper', name: 'Serper.dev (resultados de Google)', kind: 'search_api', reliability: 45, cost: 1, quota: null,
+    base_url: 'https://google.serper.dev/search', terms_url: 'https://serper.dev/terms',
+    notes: 'Resultados de Google por API, de pago por uso (aprox. 0,30-1 USD/1.000 consultas según el plan). Buscador principal recomendado. Verifica el precio en tu panel.' },
   { key: 'brave', name: 'Brave Search API', kind: 'search_api', reliability: 40, cost: 5, quota: 30,
     base_url: 'https://api.search.brave.com/res/v1/web/search', terms_url: 'https://api-dashboard.search.brave.com/',
     notes: 'De pago por uso (aprox. 5 USD/1.000 consultas, con un crédito mensual). Verifica precio y condiciones actuales en su panel.' },
@@ -125,7 +128,7 @@ export const sources = [
 ] as const;
 
 export const defaultSettings: [string, unknown, string][] = [
-  ['external_search', { enabled: true, min_internal_results: 40, max_results_per_source: 20, cache_hours: 72, timeout_ms: 8000 },
+  ['external_search', { enabled: true, min_internal_results: 40, max_results_per_source: 20, cache_hours: 72, timeout_ms: 8000, ai_expansion: true, max_queries: 6 },
     'Búsqueda en fuentes externas desde el buscador'],
   ['limits', { searches_per_hour_anon: 600, searches_per_hour_user: 2000, external_per_day_anon: 2000, external_per_day_user: 10000, daily_budget_usd: 2 },
     'Límites de consumo por usuario/IP y presupuesto diario de APIs'],

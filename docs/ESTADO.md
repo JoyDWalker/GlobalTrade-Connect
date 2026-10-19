@@ -25,7 +25,7 @@ Se distingue entre **implementado y probado en local**, **configurado pero no ve
 |---|---|
 | Supabase Auth (registro, login, recuperación, callback) | Código listo; sin proyecto Supabase todavía no se ha probado de extremo a extremo |
 | Supabase Storage (logos) | Código listo; requiere bucket `logos` y *service role key* |
-| Brave Search API / Google CSE | Adaptadores listos y probados con respuestas simuladas; sin claves reales |
+| Serper.dev / Brave Search API / Google CSE | Adaptadores listos y probados con respuestas simuladas; sin claves reales |
 | GLEIF y descarga de webs reales | Implementado; probado con datos simulados (las pruebas no usan red) |
 | Resend | Implementado; sin clave, los emails se registran (modo `log`) |
 | Vercel (build, cron, funciones) | `vercel.json` y migración en build preparados; no desplegado |
@@ -44,7 +44,7 @@ Se distingue entre **implementado y probado en local**, **configurado pero no ve
 3. Proyecto en Vercel con las variables de entorno de Production y Preview.
 4. Secretos y variables de GitHub Actions.
 5. Registro del primer administrador y `npm run admin:grant`.
-6. Opcional: Resend con dominio verificado, Brave Search API, webhook de alertas, dominio propio.
+6. Opcional: Resend con dominio verificado, Serper.dev o Brave Search API, clave de Anthropic (expansión con IA), webhook de alertas, dominio propio.
 
 ## Costes recurrentes previsibles
 

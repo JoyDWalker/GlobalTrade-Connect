@@ -174,7 +174,8 @@ export const HANDLERS: Record<string, Handler> = {
 
   /** Limpieza y retención de datos. */
   async cleanup({ db }) {
-    const cache = (await db.query('DELETE FROM search_cache WHERE expires_at < now()')).rowCount;
+    const cache = (await db.query('DELETE FROM search_cache WHERE expires_at < now()')).rowCount
+      + (await db.query('DELETE FROM query_expansions WHERE expires_at < now()')).rowCount;
     const searches = (await db.query("UPDATE searches SET ip_hash = NULL WHERE created_at < now() - interval '30 days' AND ip_hash IS NOT NULL")).rowCount;
     const oldSearches = (await db.query("DELETE FROM searches WHERE created_at < now() - interval '180 days'")).rowCount;
     const jobs = (await db.query("DELETE FROM jobs WHERE status IN ('succeeded', 'cancelled') AND finished_at < now() - interval '30 days'")).rowCount;

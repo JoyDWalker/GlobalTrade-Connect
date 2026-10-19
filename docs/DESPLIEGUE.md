@@ -52,7 +52,10 @@ git push -u origin main
    | `APP_SECRET` | aleatorio de 32+ caracteres |
    | `CRON_SECRET` | aleatorio de 32+ caracteres |
    | `EMAIL_PROVIDER` / `RESEND_API_KEY` / `EMAIL_FROM` / `ADMIN_NOTIFY_EMAIL` | ver sección 5 |
+   | `SERPER_API_KEY` | opcional (buscador principal recomendado) |
    | `BRAVE_SEARCH_API_KEY` | opcional |
+   | `ANTHROPIC_API_KEY` | opcional (amplía las búsquedas con IA) |
+   | `AI_MODEL` | opcional (por defecto `claude-opus-5-5`) |
    | `ALERT_WEBHOOK_URL` | opcional |
 
    Para **Preview** usa los valores de `globaltrade-staging`, `APP_ENV=preview` y otros `APP_SECRET`/`CRON_SECRET`. En preview el build **no** migra; aplica las migraciones a staging con `MIGRATE_ON_BUILD=true` (variable solo de Preview) o manualmente.
@@ -84,6 +87,8 @@ Sin dominio verificado, deja `EMAIL_PROVIDER=log`: los emails se registran en **
 - **GLEIF** y **Wikidata** están activas por defecto (gratuitas, licencia CC0, sin clave). GLEIF busca entidades legales por nombre en todo el mundo; Wikidata, empresas por sector/producto y país (sobre todo empresas conocidas).
 - La app también acepta las variables que crea la integración Supabase de Vercel (`POSTGRES_URL`, `SUPABASE_URL`…, con o sin prefijo como `GTC_`).
 
+- **Serper.dev** (buscador principal recomendado): crea una clave en https://serper.dev/ → `SERPER_API_KEY`. Devuelve resultados de Google, de pago por uso; ajusta en **Admin → Fuentes** la cuota diaria y el coste por 1.000 peticiones.
+- **IA para ampliar las búsquedas** (Claude): crea una clave en https://console.anthropic.com/ → `ANTHROPIC_API_KEY`. Cada producto nuevo («dulces», «licor»…) se amplía una vez con su sector, términos relacionados y consultas optimizadas; la expansión se guarda en caché 30 días y su coste cuenta en el presupuesto diario (**Admin → Ajustes**). Sin clave, la búsqueda se amplía con el catálogo de sectores. En **Admin → Ajustes** puedes desactivarla y fijar el número de consultas por búsqueda (cada consulta cuesta una petición al buscador).
 - **Brave Search API**: crea una clave en https://api-dashboard.search.brave.com/ → `BRAVE_SEARCH_API_KEY`. Es de pago por uso; ajusta en **Admin → Fuentes** la cuota diaria y el coste por 1.000 peticiones, y en **Admin → Ajustes** el presupuesto diario y los límites por usuario.
 - **Google Custom Search JSON API**: Google indica que está cerrada a clientes nuevos y que las cuentas existentes deben migrar antes del 1 de enero de 2027. Si ya tienes acceso: `GOOGLE_CSE_API_KEY` y `GOOGLE_CSE_ENGINE_ID`.
 - **GLEIF** (registro mundial de entidades legales) no necesita clave.

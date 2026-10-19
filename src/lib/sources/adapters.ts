@@ -88,6 +88,25 @@ export const googleCse: SearchAdapter = {
   },
 };
 
+// ───────── Serper.dev: resultados de Google por API (buscador principal) ─────────
+export const serper: SearchAdapter = {
+  key: 'serper',
+  isConfigured: () => Boolean(env().SERPER_API_KEY),
+  async search(query, { limit, country, timeoutMs }) {
+    const body: Record<string, unknown> = { q: query, num: Math.min(10, limit), hl: 'es' };
+    if (country) body.gl = country.toLowerCase();
+    const { res, attempts } = await fetchWithRetry('https://google.serper.dev/search', {
+      timeoutMs, retries: 2, method: 'POST', body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json', 'X-API-KEY': env().SERPER_API_KEY! },
+    });
+    const text = await res.text();
+    if (!res.ok) throw statusError('Serper', res.status, text);
+    const data = JSON.parse(text);
+    const items = (data.organic ?? []).map((r: any) => ({ title: r.title ?? '', url: r.link, snippet: r.snippet }));
+    return { hits: webResultsToHits('serper', items, country), httpStatus: res.status, attempts, billableRequests: 1 };
+  },
+};
+
 // ───────── Brave Search API ─────────
 export const brave: SearchAdapter = {
   key: 'brave',
