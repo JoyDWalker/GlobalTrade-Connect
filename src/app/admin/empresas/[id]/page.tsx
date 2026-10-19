@@ -44,7 +44,7 @@ export default function Page() {
           {detail.data.members.length > 0 && <p className="small" style={{ margin: '6px 0 0' }}>Titulares: {detail.data.members.map((m: any) => `${m.email} (${m.role})`).join(', ')}</p>}
           <p className="small" style={{ margin: '6px 0 0' }}>Solicitudes recibidas: {detail.data.inquiries}</p>
         </div>
-        <div style={{ marginBottom: 16 }}><FollowupPanel companyId={c.id} /></div>
+        <div style={{ marginBottom: 16 }}><FollowupPanel companyId={c.id} name={c.name} city={c.city} country={c.country_name} /></div>
         {detail.data.tasks.length > 0 && <div className="card card-pad" style={{ marginBottom: 16 }}><h3>Revisiones</h3>
           <ul className="source-list">{detail.data.tasks.map((t: any) => <li key={t.id}><strong>{TASK[t.kind] ?? t.kind}</strong> · {t.status} · {dt(t.created_at)}{t.resolution ? ` · ${t.resolution}` : ''}<pre className="json">{JSON.stringify(t.details, null, 1)}</pre></li>)}</ul></div>}
         <details className="card card-pad" style={{ marginBottom: 16 }}><summary><strong>Procedencia ({c.sources.length} fuentes, {c.provenance.length} datos)</strong></summary>

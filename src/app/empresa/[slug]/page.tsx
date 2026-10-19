@@ -133,7 +133,7 @@ export default async function CompanyPage({ params }: { params: Params }) {
 
         <aside>
           <ContactCard company={{ id: c.id, slug: c.slug, name: c.name, products: c.offerings.map((o: any) => o.name) }} contacts={c.contacts} email={c.email} phone={c.phone} website={site} social={social} hasPrivate={c.has_private_contacts} detected={isDetected} />
-          {user?.role === 'admin' && <FollowupPanel companyId={c.id} />}
+          {user?.role === 'admin' && <FollowupPanel companyId={c.id} name={c.name} city={c.city} country={c.country_name} />}
           <div className="card card-pad">
             <h3>Ubicación y cobertura</h3>
             <div className="contact-line"><Icon name="pin" /><span className="grow">{c.address ?? c.city ?? '—'}<br /><span className="muted small">{[c.postal_code, c.city, c.region, c.country_name].filter(Boolean).join(', ')}</span></span></div>

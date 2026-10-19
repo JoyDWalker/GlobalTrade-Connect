@@ -13,7 +13,25 @@ export const statusClass = (s: string) => (['interesado', 'cliente'].includes(s)
 type Data = { followup: { status: string; tags: string[]; next_action: string | null; next_action_at: string | null; last_contact_at: string | null } | null; notes: { id: number; kind: string; body: string; created_at: string; author: string | null }[] };
 const when = (d: string) => new Date(d).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
 
-export function FollowupPanel({ companyId }: { companyId: string }) {
+/** Enlaces para comprobar por uno mismo que la empresa existe y está activa. */
+function VerifyLinks({ name, city, country }: { name: string; city?: string | null; country?: string | null }) {
+  const q = [name, city, country].filter(Boolean).join(' ');
+  const e = encodeURIComponent;
+  const links: [string, string][] = [
+    ['Google', `https://www.google.com/search?q=${e(`"${name}" ${city ?? country ?? ''}`.trim())}`],
+    ['Google Maps', `https://www.google.com/maps/search/${e(q)}`],
+    ['LinkedIn', `https://www.linkedin.com/search/results/companies/?keywords=${e(name)}`],
+    ['Facebook', `https://www.facebook.com/search/pages/?q=${e(name)}`],
+  ];
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div className="small muted" style={{ marginBottom: 4 }}>Comprobar que existe:</div>
+      <div className="tags">{links.map(([label, href]) => <a key={label} className="chip chip-outline" href={href} target="_blank" rel="noopener noreferrer nofollow">{label}</a>)}</div>
+    </div>
+  );
+}
+
+export function FollowupPanel({ companyId, name, city, country }: { companyId: string; name: string; city?: string | null; country?: string | null }) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -31,6 +49,7 @@ export function FollowupPanel({ companyId }: { companyId: string }) {
   return (
     <div className="card card-pad followup">
       <h2>Seguimiento <span className="badge" title="Solo lo ves tú">Privado</span></h2>
+      <VerifyLinks name={name} city={city} country={country} />
       <form key={`f${formKey}`} onSubmit={(e) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);

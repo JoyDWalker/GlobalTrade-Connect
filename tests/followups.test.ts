@@ -22,6 +22,16 @@ async function makeUser(db: any, email: string, role: SessionUser['role'] = 'use
 }
 afterEach(() => setTestUser(undefined));
 
+describe('estadísticas de consultas', () => {
+  it('muestra la consulta como se escribió, no la raíz interna', async () => {
+    const db = await freshDb();
+    const { adminStats } = await import('@/lib/services/admin');
+    for (const q of ['envases compostables', 'Envases compostables', ' ENVASES COMPOSTABLES ']) await performSearch(db, searchParamsFromUrl(new URLSearchParams({ q })), { user: null, ipHash: 'x' });
+    const top = (await adminStats(db)).topQueries;
+    expect(top[0]).toMatchObject({ query: 'envases compostables', n: 3 });
+  });
+});
+
 describe('seguimiento comercial', () => {
   it('solo el administrador accede; guarda estado, etiquetas, próxima acción y notas', async () => {
     const db = await freshDb({ demo: true });

@@ -37,8 +37,9 @@ export async function adminStats(q: Queryable) {
   const searches = await many(q, `SELECT date_trunc('day', created_at)::date::text AS day, count(*)::int AS n,
       count(*) FILTER (WHERE external_status IN ('ok', 'partial'))::int AS external FROM searches
     WHERE created_at > now() - interval '14 days' GROUP BY 1 ORDER BY 1`);
-  const topQueries = await many(q, `SELECT query_normalized AS query, count(*)::int AS n, round(avg(internal_results))::int AS avg_results FROM searches
-    WHERE created_at > now() - interval '30 days' AND query_normalized <> '' GROUP BY 1 ORDER BY n DESC LIMIT 10`);
+  // Se agrupan las variantes («café», «cafes») y se muestra cómo se escribió la más frecuente, no la raíz interna («caf»)
+  const topQueries = await many(q, `SELECT mode() WITHIN GROUP (ORDER BY lower(trim(query))) AS query, count(*)::int AS n, round(avg(internal_results))::int AS avg_results FROM searches
+    WHERE created_at > now() - interval '30 days' AND query_normalized <> '' GROUP BY query_normalized ORDER BY n DESC LIMIT 10`);
   return { totals, byCountry, bySector, searches, topQueries };
 }
 
