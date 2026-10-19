@@ -39,7 +39,7 @@ describe('cola de tareas', () => {
     const db = await freshDb({ demo: true });
     expect(await scheduleRecurring(db)).toBeGreaterThan(3);
     expect(await scheduleRecurring(db)).toBe(0);
-    await db.query("DELETE FROM jobs WHERE type = 'check_links'");    // sin red en las pruebas
+    await db.query("DELETE FROM jobs WHERE type IN ('check_links', 'import_wikidata')");    // sin red en las pruebas
     const r = await runWorker(db, { timeBudgetMs: 20000, schedule: false });
     expect(r.processed.length).toBeGreaterThan(0);
     expect(r.processed.filter((p) => !p.ok)).toEqual([]);

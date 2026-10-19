@@ -13,7 +13,8 @@ import { findContacts } from '../sources/find-contacts';
 import { SourceError } from '../sources/http';
 import { refreshSearchText, searchCompanies } from '../services/companies';
 import { searchParamsSchema } from '../validation';
-import { runExternalSearch, spentTodayUsd } from '../search/external';
+import { ingestHit, runExternalSearch, spentTodayUsd } from '../search/external';
+import { wikidataCompaniesPage } from '../sources/wikidata-bulk';
 import { findDuplicate } from '../services/companies';
 import { claimNext, completeJob, enqueue, enqueueOncePerPeriod, failJob, recoverStuck, type Job } from './queue';
 
@@ -29,6 +30,8 @@ async function openTask(db: Db, companyId: string | null, kind: string, details:
 
 /** Dependencias de la búsqueda de contactos (sustituibles en pruebas). */
 export const contactSearch = { find: findContacts, webAdapters: () => [serper, brave, googleCse].filter((a) => a.isConfigured()) };
+/** Fuente de la importación masiva (sustituible en pruebas). */
+export const bulkSource = { page: wikidataCompaniesPage };
 
 /**
  * Empresa detectada sin web: busca su web, teléfono y correo por nombre y ciudad. Siempre con fuentes gratuitas
@@ -125,17 +128,68 @@ export const HANDLERS: Record<string, Handler> = {
     }
   },
 
-  /** Programa la búsqueda de teléfono y correo de las empresas detectadas que aún no tienen ninguno. */
+  /** Programa la búsqueda de teléfono y correo de las empresas detectadas a las que les falta alguno. */
   async fill_contacts({ db }) {
-    const cfg = await getSetting(db, 'worker');
+    const cfg = await getSetting(db, 'bulk_import');
     const rows = await many<{ id: string }>(db, `SELECT id FROM companies
-      WHERE deleted_at IS NULL AND is_demo = false AND origin = 'external' AND record_status IN ('published', 'detected') AND email IS NULL AND phone IS NULL
+      WHERE deleted_at IS NULL AND is_demo = false AND origin = 'external' AND record_status IN ('published', 'detected') AND (email IS NULL OR phone IS NULL)
         AND ((website IS NOT NULL AND website_checked_at IS NULL)
           OR (website IS NULL AND (contacts_searched_at IS NULL OR contacts_searched_at < now() - interval '30 days')))
-      ORDER BY contacts_searched_at NULLS FIRST, created_at DESC LIMIT $1`, [cfg.batch_size * 3]);
+      ORDER BY contacts_searched_at NULLS FIRST, created_at DESC LIMIT $1`, [cfg.contacts_per_hour]);
     let queued = 0;
     for (const r of rows) if (await enqueue(db, 'enrich_company', { companyId: r.id }, { dedupeKey: `enrich:${r.id}`, priority: 55 })) queued++;
     return { queued };
+  },
+
+  /**
+   * Importación automática de empresas reales desde Wikidata, país por país (primero los prioritarios), en tandas.
+   * Continúa donde se quedó; al terminar todos los países, vuelve a empezar a los 30 días para recoger las nuevas.
+   */
+  async import_wikidata({ db, deadline }) {
+    const cfg = await getSetting(db, 'bulk_import');
+    if (!cfg.enabled) return { skipped: 'importación desactivada' };
+    const total = Number((await one<{ n: string }>(db, 'SELECT count(*) AS n FROM companies WHERE deleted_at IS NULL'))!.n);
+    if (total >= cfg.max_companies) return { skipped: `tope de ${cfg.max_companies} empresas alcanzado` };
+    await db.query("INSERT INTO import_cursors (source, country_code) SELECT 'wikidata', iso_code FROM countries ON CONFLICT DO NOTHING");
+    await db.query("UPDATE import_cursors SET done = false, last_key = 0, failures = 0 WHERE source = 'wikidata' AND done AND updated_at < now() - interval '30 days'");
+    const cur = await one<{ country_code: string; last_key: string; failures: number }>(db, `SELECT c.country_code, c.last_key, c.failures FROM import_cursors c
+      JOIN countries co ON co.iso_code = c.country_code WHERE c.source = 'wikidata' AND NOT c.done
+      ORDER BY co.is_priority DESC, c.updated_at NULLS FIRST, co.sort_order LIMIT 1`);
+    if (!cur) return { skipped: 'todos los países importados; se repetirá dentro de 30 días' };
+    const src = await sourceId(db, 'wikidata');
+    const started = Date.now();
+    const limit = Math.min(cfg.batch_size, cfg.max_companies - total);
+    let page: Awaited<ReturnType<typeof bulkSource.page>>;
+    try {
+      page = await bulkSource.page(cur.country_code, Number(cur.last_key), limit, Math.max(10_000, Math.min(40_000, deadline - Date.now() - 12_000)));
+    } catch (e) {
+      const se = e as SourceError;
+      // Tras 3 fallos seguidos (p. ej. un país demasiado grande para una consulta) se pasa al siguiente
+      await db.query("UPDATE import_cursors SET failures = failures + 1, done = failures + 1 >= 3, last_error = $3, updated_at = now() WHERE source = 'wikidata' AND country_code = $1 AND last_key = $2",
+        [cur.country_code, cur.last_key, se.message?.slice(0, 300) ?? 'error']);
+      if (src) await db.query("INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, error) VALUES ($1,'search',$2,$3,$4,$5,$6)",
+        [src, `importación ${cur.country_code}`, se.kind === 'timeout' ? 'timeout' : se.kind === 'rate_limited' ? 'rate_limited' : 'error', se.httpStatus ?? null, Date.now() - started, se.message?.slice(0, 500) ?? null]);
+      return { country: cur.country_code, error: se.message };
+    }
+    let created = 0;
+    let lastKey = Number(cur.last_key);
+    let complete = true;
+    for (const h of page.hits) {
+      if (Date.now() > deadline - 3000) { complete = false; break; }
+      try {
+        const r = await ingestHit(db, h, src!, { bulk: true });
+        if (r?.created) created++;
+      } catch (e) { log.warn('No se pudo importar una empresa', { externalId: h.externalId, error: e }); }
+      lastKey = Math.max(lastKey, Number(h.externalId.replace(/\D/g, '')));
+    }
+    // Las filas descartadas (sin nombre o web válida) también avanzan el cursor si se procesó toda la tanda
+    if (complete && page.lastKey) lastKey = Math.max(lastKey, page.lastKey);
+    const finished = complete && page.rows < limit;
+    await db.query(`UPDATE import_cursors SET last_key = $3, done = $4, imported = imported + $5, failures = 0, last_error = NULL, updated_at = now()
+      WHERE source = 'wikidata' AND country_code = $1 AND last_key = $2`, [cur.country_code, cur.last_key, lastKey, finished, created]);
+    if (src) await db.query("INSERT INTO external_requests (source_id, purpose, query, status, http_status, attempts, duration_ms, results) VALUES ($1,'search',$2,'ok',$3,$4,$5,$6)",
+      [src, `importación ${cur.country_code}`, page.httpStatus, page.attempts, Date.now() - started, page.hits.length]);
+    return { country: cur.country_code, fetched: page.rows, created, finished };
   },
 
   /** Verificación en registro abierto (GLEIF). Añade evidencias; "verificada" la decide un administrador. */
@@ -263,6 +317,7 @@ export async function scheduleRecurring(db: Db, now = new Date()) {
     await enqueueOncePerPeriod(db, 'process_supplier_requests', hour),
     await enqueueOncePerPeriod(db, 'check_links', hour),
     await enqueueOncePerPeriod(db, 'fill_contacts', hour),
+    await enqueueOncePerPeriod(db, 'import_wikidata', now.toISOString().slice(0, 15)),   // cada 10 min (en cada ejecución del worker)
     await enqueueOncePerPeriod(db, 'flag_stale', day),
     await enqueueOncePerPeriod(db, 'detect_duplicates', day),
     await enqueueOncePerPeriod(db, 'cleanup', day),

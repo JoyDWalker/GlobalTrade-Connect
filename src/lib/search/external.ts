@@ -54,7 +54,7 @@ async function logRequest(q: Queryable, r: { sourceId: number; purpose: string; 
  * Inserta o actualiza una empresa detectada. Deduplica por dominio (y nombre+país como aviso).
  * Devuelve el id y si es nueva. Los datos quedan como "detectados", con su procedencia.
  */
-export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promise<{ id: string; created: boolean } | null> {
+export async function ingestHit(db: Db, h: CompanyHit, sourceId: number, { bulk = false }: { bulk?: boolean } = {}): Promise<{ id: string; created: boolean } | null> {
   if (!h.name || h.name.length < 2) return null;
   const srcUrl = h.url ?? ((h.raw as any)?.url as string | undefined) ?? null;
   return db.tx(async (q) => {
@@ -84,6 +84,8 @@ export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promis
     await refreshSearchText(q, id);
     // El snippet ayuda a encontrarla, pero no se presenta como descripción verificada
     if (h.snippet) await q.query("UPDATE companies SET search_text = search_text || ' ' || $2 WHERE id = $1", [id, normalize(h.snippet)]);
+    // En la importación masiva no se crea tarea de revisión por empresa y los contactos se buscan a ritmo controlado (fill_contacts)
+    if (bulk) return { id, created: true };
     await q.query(`INSERT INTO review_tasks (company_id, kind, priority, details, dedupe_key) VALUES ($1, 'new_detected', 20, $2, $3)
       ON CONFLICT (dedupe_key) WHERE status = 'open' AND dedupe_key IS NOT NULL DO NOTHING`, [id, JSON.stringify({ source: h.sourceKey, url: h.url }), `new_detected:${id}`]);
     // Obtener email y teléfono corporativos: visitando su web o, si no se conoce, buscándola por nombre

@@ -137,5 +137,7 @@ export const defaultSettings: [string, unknown, string][] = [
     'Límites de consumo por usuario/IP y presupuesto diario de APIs'],
   ['worker', { batch_size: 10, time_budget_ms: 45000, stale_after_days: 90, link_check_after_days: 30, stuck_after_minutes: 15, concurrency: 6 },
     'Parámetros del worker'],
+  ['bulk_import', { enabled: true, batch_size: 200, max_companies: 50000, contacts_per_hour: 120 },
+    'Importación automática y gratuita de empresas reales (Wikidata) y búsqueda de sus contactos'],
   ['discovery_queries', [] as string[], 'Consultas que el worker usa para descubrir empresas nuevas (p. ej. "exportadores de café Colombia")'],
 ];

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { apiFetch, Field, useToast } from '@/components/client';
 import { dt, Loading, useAdmin } from '../hooks';
 
-const TYPES: Record<string, string> = { enrich_company: 'Completar ficha (web, teléfono y correo)', fill_contacts: 'Buscar teléfono y correo de empresas sin contacto', verify_registry: 'Consultar registro GLEIF', check_links: 'Comprobar webs', flag_stale: 'Programar actualización de fichas antiguas', detect_duplicates: 'Detectar duplicados', process_supplier_requests: 'Preparar candidatos para solicitudes', discovery: 'Descubrir empresas (búsqueda externa)', send_emails: 'Enviar emails pendientes', cleanup: 'Limpieza y retención' };
+const TYPES: Record<string, string> = { enrich_company: 'Completar ficha (web, teléfono y correo)', fill_contacts: 'Buscar teléfono y correo de empresas sin contacto', import_wikidata: 'Importar empresas reales (Wikidata)', verify_registry: 'Consultar registro GLEIF', check_links: 'Comprobar webs', flag_stale: 'Programar actualización de fichas antiguas', detect_duplicates: 'Detectar duplicados', process_supplier_requests: 'Preparar candidatos para solicitudes', discovery: 'Descubrir empresas (búsqueda externa)', send_emails: 'Enviar emails pendientes', cleanup: 'Limpieza y retención' };
 
 export default function Page() {
   const [status, setStatus] = useState('');
