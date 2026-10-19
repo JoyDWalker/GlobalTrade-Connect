@@ -331,7 +331,7 @@ export async function companyCards(q: Queryable, ids: string[]): Promise<Company
       coalesce(c.phone, (SELECT k.phone FROM company_contacts k WHERE k.company_id = c.id AND k.phone IS NOT NULL AND NOT k.hidden AND (NOT k.is_personal OR k.consent_public) ORDER BY k.is_primary DESC, k.id LIMIT 1)) AS phone,
       (c.lei IS NOT NULL OR c.verification_level <> 'none' OR EXISTS (SELECT 1 FROM verification_events v WHERE v.company_id = c.id AND v.kind = 'registry_lookup' AND v.result = 'match')) AS sig_registry,
       c.website_status IN ('ok', 'redirect') AS sig_website,
-      EXISTS (SELECT 1 FROM data_provenance d WHERE d.company_id = c.id AND d.source_url LIKE 'https://www.google.com/maps%') AS sig_maps,
+      EXISTS (SELECT 1 FROM data_provenance d WHERE d.company_id = c.id AND (d.source_url LIKE 'https://www.google.com/maps%' OR d.source_url LIKE 'https://www.openstreetmap.org/%')) AS sig_maps,
       left(coalesce(c.description, c.main_activity, (SELECT snippet FROM company_sources WHERE company_id = c.id ORDER BY last_seen_at DESC LIMIT 1)), 200) AS excerpt,
       coalesce((SELECT array_agg(b.name ORDER BY b.sort_order) FROM business_types b WHERE b.slug = ANY(c.company_types)), '{}') AS type_names,
       coalesce((SELECT json_agg(json_build_object('name', ca.name, 'slug', ca.slug) ORDER BY ca.sort_order)

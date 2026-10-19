@@ -1,10 +1,12 @@
-// Contactos de empresas sin web conocida (p. ej. las que llegan de GLEIF, que solo publica nombre y dirección):
-// 1) ficha de Google Maps vía Serper (teléfono, web y dirección públicos);
-// 2) si sigue sin web, buscador web con el nombre y la ciudad, aceptando solo un dominio que corresponda al nombre.
+// Contactos de empresas sin web conocida (p. ej. las que llegan de GLEIF, que solo publica nombre y dirección).
+// Gratuitas (siempre): OpenStreetMap (teléfono, email, web) y deducir la web por el nombre, comprobando que la página es
+// de esa empresa. De pago (solo con clave): ficha de Google Maps vía Serper y buscador web.
 // El email se obtiene después visitando la web encontrada (página de inicio y de contacto).
 import { isGenericDomain, normalize, normalizeDomain, rootDomain } from '../text';
 import { serper, serperPlaces, type SearchAdapter } from './adapters';
 import { SourceError } from './http';
+import { distinctiveWord, overpassLookup } from './osm';
+import { guessWebsite } from './guess-domain';
 
 // Formas jurídicas y palabras que no identifican a la empresa
 const NOISE = new Set(['sa', 'sl', 'slu', 'sas', 'srl', 'spa', 'sarl', 'ltd', 'ltda', 'limited', 'gmbh', 'ag', 'bv', 'nv', 'ab', 'as', 'oy', 'aps', 'kg', 'inc', 'llc', 'llp',
@@ -24,7 +26,7 @@ export function domainMatchesName(domain: string, name: string) {
   return tokens.some((t) => t.length >= 5 && label.includes(t)) || (tokens.length > 1 && label.includes(tokens[0] + tokens[1]));
 }
 
-/** ¿El negocio de Google Maps es esta empresa? Coincide la palabra más distintiva y al menos la mitad de las demás. */
+/** ¿El negocio del mapa es esta empresa? Coincide la palabra más distintiva y al menos la mitad de las demás. */
 export function placeMatchesName(title: string, name: string) {
   const tokens = nameTokens(name);
   const t = normalize(title);
@@ -35,7 +37,13 @@ export function placeMatchesName(title: string, name: string) {
 }
 
 export interface ContactCall { sourceKey: string; query: string; status: 'ok' | 'error' | 'timeout' | 'rate_limited' | 'quota_exceeded'; results: number; ms: number; httpStatus?: number; error?: string }
-export interface FoundContacts { website: string | null; phone: string | null; address: string | null; sourceKey: string | null; sourceUrl: string | null; calls: ContactCall[] }
+type Field = 'website' | 'phone' | 'email' | 'address';
+export interface FoundContacts {
+  website: string | null; phone: string | null; email: string | null; address: string | null;
+  /** Fuente de cada dato encontrado (clave de la fuente y URL donde se publica) */
+  origin: Partial<Record<Field, { sourceKey: string; url: string | null }>>;
+  calls: ContactCall[];
+}
 
 const callStatus = (e: unknown): ContactCall['status'] => {
   const k = e instanceof SourceError ? e.kind : 'network';
@@ -43,29 +51,57 @@ const callStatus = (e: unknown): ContactCall['status'] => {
 };
 
 export async function findContacts(c: { name: string; city: string | null; country_code: string | null },
-  { webAdapters, usePlaces, timeoutMs = 8000 }: { webAdapters: SearchAdapter[]; usePlaces: boolean; timeoutMs?: number }): Promise<FoundContacts> {
-  const out: FoundContacts = { website: null, phone: null, address: null, sourceKey: null, sourceUrl: null, calls: [] };
+  { webAdapters, usePlaces, timeoutMs = 8000, osm = overpassLookup, guess = guessWebsite }:
+  { webAdapters: SearchAdapter[]; usePlaces: boolean; timeoutMs?: number; osm?: typeof overpassLookup; guess?: typeof guessWebsite }): Promise<FoundContacts> {
+  const out: FoundContacts = { website: null, phone: null, email: null, address: null, origin: {}, calls: [] };
+  const set = (field: Field, value: string | null | undefined, sourceKey: string, url: string | null) => {
+    const v = value?.trim();
+    if (!v || out[field]) return;
+    out[field] = field === 'email' ? v.toLowerCase() : v;
+    out.origin[field] = { sourceKey, url };
+  };
+  const siteOf = (raw: string | null) => { const d = normalizeDomain(raw); return d && !isGenericDomain(d) ? `https://${d}` : null; };
   const query = [c.name, c.city].filter(Boolean).join(' ');
+  const tokens = nameTokens(c.name);
 
-  if (usePlaces) {
+  // 1. OpenStreetMap (gratuito). Solo con ciudad: buscar en un país entero sería demasiado costoso para el servicio
+  const word = distinctiveWord(c.name, tokens);
+  if (c.city && word) {
+    const started = Date.now();
+    const q = `osm: ${word} @ ${c.city}`;
+    try {
+      const r = await osm(word, c.city);
+      out.calls.push({ sourceKey: 'osm', query: q, status: 'ok', results: r.places.length, ms: Date.now() - started, httpStatus: r.httpStatus });
+      const p = r.places.find((x) => placeMatchesName(x.name, c.name));
+      if (p) {
+        set('phone', p.phone, 'osm', p.url);
+        set('email', p.email, 'osm', p.url);
+        set('website', siteOf(p.website), 'osm', p.url);
+        set('address', p.address, 'osm', p.url);
+      }
+    } catch (e) {
+      out.calls.push({ sourceKey: 'osm', query: q, status: callStatus(e), results: 0, ms: Date.now() - started, error: (e as Error).message });
+    }
+  }
+
+  // 2. Google Maps vía Serper (de pago, solo con clave) si aún falta el teléfono
+  if (usePlaces && !out.phone) {
     const started = Date.now();
     try {
       const r = await serperPlaces(query, { country: c.country_code, timeoutMs });
       out.calls.push({ sourceKey: serper.key, query: `maps: ${query}`, status: 'ok', results: r.places.length, ms: Date.now() - started, httpStatus: r.httpStatus });
       const p = r.places.find((x) => placeMatchesName(x.title, c.name));
       if (p) {
-        const d = normalizeDomain(p.website);
-        out.phone = p.phone?.trim() || null;
-        out.address = p.address;
-        out.website = d && !isGenericDomain(d) ? `https://${d}` : null;
-        out.sourceKey = serper.key;
-        out.sourceUrl = p.url;
+        set('phone', p.phone, serper.key, p.url);
+        set('website', siteOf(p.website), serper.key, p.url);
+        set('address', p.address, serper.key, p.url);
       }
     } catch (e) {
       out.calls.push({ sourceKey: serper.key, query: `maps: ${query}`, status: callStatus(e), results: 0, ms: Date.now() - started, error: (e as Error).message });
     }
   }
 
+  // 3. Buscador web (de pago, solo con clave)
   for (const a of webAdapters) {
     if (out.website) break;
     const started = Date.now();
@@ -73,10 +109,18 @@ export async function findContacts(c: { name: string; city: string | null; count
       const r = await a.search(`"${c.name}" ${c.city ?? ''}`.trim(), { limit: 10, country: c.country_code, timeoutMs });
       out.calls.push({ sourceKey: a.key, query, status: 'ok', results: r.hits.length, ms: Date.now() - started, httpStatus: r.httpStatus });
       const h = r.hits.find((x) => x.domain && domainMatchesName(x.domain, c.name));
-      if (h) { out.website = `https://${h.domain}`; out.sourceKey ??= a.key; out.sourceUrl ??= (h.raw as any)?.url ?? h.url; }
+      if (h) set('website', `https://${h.domain}`, a.key, ((h.raw as any)?.url as string | undefined) ?? h.url);
     } catch (e) {
       out.calls.push({ sourceKey: a.key, query, status: callStatus(e), results: 0, ms: Date.now() - started, error: (e as Error).message });
     }
+  }
+
+  // 4. Deducir la web por el nombre (gratuito), aceptándola solo si la página es de esta empresa
+  if (!out.website && tokens.length) {
+    const started = Date.now();
+    const g = await guess(tokens, c.country_code, c.city);
+    out.calls.push({ sourceKey: 'website', query: `dominios: ${g.tried.join(', ')}`, status: 'ok', results: g.website ? 1 : 0, ms: Date.now() - started });
+    set('website', g.website, 'website', g.website);
   }
   return out;
 }

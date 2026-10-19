@@ -31,15 +31,15 @@ async function openTask(db: Db, companyId: string | null, kind: string, details:
 export const contactSearch = { find: findContacts, webAdapters: () => [serper, brave, googleCse].filter((a) => a.isConfigured()) };
 
 /**
- * Empresa detectada sin web: busca su web y teléfono por nombre y ciudad (Google Maps vía Serper y buscador web).
- * Respeta el presupuesto diario y deja constancia de cada llamada y de la procedencia de cada dato.
+ * Empresa detectada sin web: busca su web, teléfono y correo por nombre y ciudad. Siempre con fuentes gratuitas
+ * (OpenStreetMap y deducir su web por el nombre); con clave de Serper, también Google Maps y buscador web, dentro del
+ * presupuesto diario. Deja constancia de cada llamada y de la fuente de cada dato.
  */
 async function searchMissingContacts(db: Db, c: any, jobId: number) {
-  const adapters = contactSearch.webAdapters();
-  const srcs = await many<{ id: number; key: string; enabled: boolean; cost_per_1000_usd: string }>(db, 'SELECT id, key, enabled, cost_per_1000_usd FROM sources WHERE key = ANY($1::text[])', [adapters.map((a) => a.key)]);
-  const usable = adapters.filter((a) => srcs.find((s) => s.key === a.key)?.enabled);
-  if (!usable.length) return { skipped: 'sin web y sin buscador configurado' };
-  if ((await spentTodayUsd(db)) >= (await getSetting(db, 'limits')).daily_budget_usd) return { skipped: 'presupuesto diario de APIs agotado' };
+  const paid = contactSearch.webAdapters();
+  const srcs = await many<{ id: number; key: string; enabled: boolean; cost_per_1000_usd: string }>(db, 'SELECT id, key, enabled, cost_per_1000_usd FROM sources WHERE key = ANY($1::text[])', [[...paid.map((a) => a.key), 'osm', 'website']]);
+  const overBudget = paid.length > 0 && (await spentTodayUsd(db)) >= (await getSetting(db, 'limits')).daily_budget_usd;
+  const usable = overBudget ? [] : paid.filter((a) => srcs.find((s) => s.key === a.key)?.enabled);
 
   const r = await contactSearch.find({ name: c.name, city: c.city, country_code: c.country_code }, { webAdapters: usable, usePlaces: usable.some((a) => a.key === 'serper') });
   for (const call of r.calls) {
@@ -55,13 +55,15 @@ async function searchMissingContacts(db: Db, c: any, jobId: number) {
     if (domain && !(await findDuplicate(db, { domain }, c.id))) { updates.website = r.website; updates.domain = domain; }
   }
   if (r.phone && !c.phone) updates.phone = r.phone.slice(0, 60);
+  if (r.email && !c.email && /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(r.email)) updates.email = r.email.slice(0, 200);
   if (r.address && !c.address) updates.address = r.address.slice(0, 200);
-  const srcId = srcs.find((s) => s.key === r.sourceKey)?.id ?? null;
   await db.tx(async (q) => {
     const keys = Object.keys(updates);
     await q.query(`UPDATE companies SET contacts_searched_at = now()${keys.map((k, i) => `, ${k} = $${i + 2}`).join('')} WHERE id = $1`, [c.id, ...keys.map((k) => updates[k])]);
     for (const k of keys.filter((k) => k !== 'domain')) {
-      await q.query("INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,'detected')", [c.id, k, updates[k], srcId, r.sourceUrl]);
+      const o = r.origin[k as keyof typeof r.origin];
+      await q.query("INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,'detected')",
+        [c.id, k, updates[k], srcs.find((s) => s.key === o?.sourceKey)?.id ?? null, o?.url ?? null]);
     }
     if (keys.length) {
       await q.query("INSERT INTO company_changes (company_id, change_source, changes) VALUES ($1, 'worker', $2)",
@@ -83,7 +85,7 @@ export const HANDLERS: Record<string, Handler> = {
       if (c.origin !== 'external') return { skipped: 'sin web' };
       search = await searchMissingContacts(db, c, job.id);
       if (!('website' in search) || !search.website) return search;
-      Object.assign(c, await one<any>(db, 'SELECT website, phone, address FROM companies WHERE id = $1', [c.id]));
+      Object.assign(c, await one<any>(db, 'SELECT website, phone, email, address FROM companies WHERE id = $1', [c.id]));
     }
     const src = await sourceId(db, 'website');
     const started = Date.now();
@@ -126,12 +128,11 @@ export const HANDLERS: Record<string, Handler> = {
   /** Programa la búsqueda de teléfono y correo de las empresas detectadas que aún no tienen ninguno. */
   async fill_contacts({ db }) {
     const cfg = await getSetting(db, 'worker');
-    const canSearch = contactSearch.webAdapters().length > 0;
     const rows = await many<{ id: string }>(db, `SELECT id FROM companies
       WHERE deleted_at IS NULL AND is_demo = false AND origin = 'external' AND record_status IN ('published', 'detected') AND email IS NULL AND phone IS NULL
         AND ((website IS NOT NULL AND website_checked_at IS NULL)
-          OR ($1 AND website IS NULL AND (contacts_searched_at IS NULL OR contacts_searched_at < now() - interval '30 days')))
-      ORDER BY contacts_searched_at NULLS FIRST, created_at DESC LIMIT $2`, [canSearch, cfg.batch_size * 3]);
+          OR (website IS NULL AND (contacts_searched_at IS NULL OR contacts_searched_at < now() - interval '30 days')))
+      ORDER BY contacts_searched_at NULLS FIRST, created_at DESC LIMIT $1`, [cfg.batch_size * 3]);
     let queued = 0;
     for (const r of rows) if (await enqueue(db, 'enrich_company', { companyId: r.id }, { dedupeKey: `enrich:${r.id}`, priority: 55 })) queued++;
     return { queued };

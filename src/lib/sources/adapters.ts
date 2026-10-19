@@ -260,7 +260,7 @@ export function parseSite(html: string, pageUrl: string): Omit<SiteInfo, 'finalU
 }
 
 const robotsCache = new Map<string, { at: number; txt: string | null }>();
-async function robotsAllows(url: URL, timeoutMs: number) {
+export async function robotsAllows(url: URL, timeoutMs: number) {
   const key = url.origin;
   let entry = robotsCache.get(key);
   if (!entry || Date.now() - entry.at > 3600e3) {

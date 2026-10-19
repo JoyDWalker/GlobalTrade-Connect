@@ -52,7 +52,7 @@ export function Signals({ c }: { c: Pick<Card, 'sig_registry' | 'sig_website' | 
   const items: [boolean, string, string][] = [
     [c.sig_registry, 'Registro oficial', 'Inscrita y activa en un registro oficial (GLEIF) o verificada por el equipo'],
     [c.sig_website, 'Web activa', 'Su web responde (comprobada por el sistema)'],
-    [c.sig_maps, 'Google Maps', 'Tiene ficha de negocio en Google Maps'],
+    [c.sig_maps, 'En el mapa', 'Tiene ficha de negocio en OpenStreetMap o Google Maps'],
     [Boolean(c.phone || c.email), 'Contactable', 'Tiene teléfono o correo públicos'],
   ];
   const n = items.filter(([ok]) => ok).length;
