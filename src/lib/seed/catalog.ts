@@ -128,7 +128,7 @@ export const sources = [
 ] as const;
 
 export const defaultSettings: [string, unknown, string][] = [
-  ['external_search', { enabled: true, min_internal_results: 40, max_results_per_source: 20, cache_hours: 72, timeout_ms: 8000, ai_expansion: true, max_queries: 6 },
+  ['external_search', { enabled: true, min_internal_results: 40, max_results_per_source: 20, cache_hours: 72, timeout_ms: 8000, ai_expansion: true, max_queries: 6, admins_only: true },
     'Búsqueda en fuentes externas desde el buscador'],
   ['limits', { searches_per_hour_anon: 600, searches_per_hour_user: 2000, external_per_day_anon: 2000, external_per_day_user: 10000, daily_budget_usd: 2 },
     'Límites de consumo por usuario/IP y presupuesto diario de APIs'],

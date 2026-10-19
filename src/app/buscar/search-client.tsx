@@ -157,6 +157,18 @@ export function ExportBar({ total, exportQuery, pageIds }: { total: number; expo
 interface External { status: string; reason?: string; newCompanies: number; items: Card[]; expansion?: { origin: 'ai' | 'catalog'; sector: string | null; relatedTerms: string[]; queries: string[] } | null; sources: { key: string; name: string; status: string; results: number; message?: string }[] }
 const SOURCE_STATUS: Record<string, string> = { ok: 'consultada', cached: 'desde caché', error: 'error', timeout: 'sin respuesta', quota_exceeded: 'cuota agotada', rate_limited: 'límite de peticiones', disabled: 'desactivada', not_configured: 'sin configurar', budget_exceeded: 'presupuesto agotado' };
 
+/** Para administradores: buscar en Internet aunque ya haya bastantes empresas guardadas. */
+export function ExternalOnDemand(props: { q: string; country: string | null; searchId: number | null }) {
+  const [on, setOn] = useState(false);
+  if (on) return <ExternalResults {...props} />;
+  return (
+    <div className="card card-pad ext-panel row" style={{ marginTop: 16 }}>
+      <span className="small muted" style={{ flex: 1, minWidth: 200 }}>¿Quieres más empresas? Busca «{props.q}» en Internet (consume de tu presupuesto de APIs).</span>
+      <button className="btn btn-primary btn-sm" onClick={() => setOn(true)}><Icon name="search" /> Buscar más en Internet</button>
+    </div>
+  );
+}
+
 /** Búsqueda en fuentes externas en segundo plano: no bloquea los resultados ya mostrados. */
 export function ExternalResults({ q, country, searchId }: { q: string; country: string | null; searchId: number | null }) {
   const [state, setState] = useState<'loading' | 'done' | 'error'>('loading');

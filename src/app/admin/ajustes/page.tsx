@@ -3,7 +3,7 @@ import { apiFetch, useToast } from '@/components/client';
 import { Loading, useAdmin } from '../hooks';
 
 const LABELS: Record<string, [string, Record<string, string>]> = {
-  external_search: ['Búsqueda externa', { enabled: 'Activada', min_internal_results: 'Consultar fuera si hay menos de N resultados propios', max_results_per_source: 'Resultados máximos por fuente', cache_hours: 'Caché (horas)', timeout_ms: 'Tiempo máximo por fuente (ms)', ai_expansion: 'Ampliar la búsqueda con IA (sector y términos relacionados)', max_queries: 'Consultas generadas por búsqueda (máx. 10)' }],
+  external_search: ['Búsqueda externa', { enabled: 'Activada', min_internal_results: 'Consultar fuera si hay menos de N resultados propios', max_results_per_source: 'Resultados máximos por fuente', cache_hours: 'Caché (horas)', timeout_ms: 'Tiempo máximo por fuente (ms)', ai_expansion: 'Ampliar la búsqueda con IA (sector y términos relacionados)', max_queries: 'Consultas generadas por búsqueda (máx. 10)', admins_only: 'Solo administradores pueden lanzar búsquedas externas' }],
   limits: ['Límites de uso', { searches_per_hour_anon: 'Búsquedas/hora (visitante)', searches_per_hour_user: 'Búsquedas/hora (usuario)', external_per_day_anon: 'Búsquedas externas/día (visitante)', external_per_day_user: 'Búsquedas externas/día (usuario)', daily_budget_usd: 'Presupuesto diario de APIs (USD)' }],
   worker: ['Worker', { batch_size: 'Tamaño de lote', time_budget_ms: 'Tiempo por ejecución (ms, ≤ 55.000 en Vercel)', stale_after_days: 'Actualizar fichas con más de N días', link_check_after_days: 'Comprobar webs cada N días', stuck_after_minutes: 'Recuperar tareas atascadas tras N min', concurrency: 'Webs visitadas en paralelo' }],
 };
