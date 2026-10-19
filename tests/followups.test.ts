@@ -76,6 +76,7 @@ describe('seguimiento comercial', () => {
     expect(visitor.suggestExternal).toBe(false);
     expect(visitor.canExternal).toBe(false);
     setTestUser(await makeUser(db, 'a2@x.example', 'admin'));
+    await db.query('UPDATE sources SET enabled = false');   // sin llamadas reales a Internet en las pruebas
     expect((await external.POST(req('POST', '/api/search/external', { q: 'dulces' }), ctx())).status).toBe(200);
   });
 });
