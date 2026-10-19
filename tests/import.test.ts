@@ -3,6 +3,9 @@ import { freshDb } from './helpers';
 import { bulkSource, HANDLERS } from '@/lib/jobs/worker';
 import { companiesQuery, parseCompanies } from '@/lib/sources/wikidata-bulk';
 import { SourceError } from '@/lib/sources/http';
+import { NextRequest } from 'next/server';
+import { setTestUser } from '@/lib/auth/session';
+import * as runRoute from '@/app/api/admin/run/route';
 
 const original = { ...bulkSource };
 afterEach(() => Object.assign(bulkSource, original));
@@ -72,4 +75,20 @@ describe('importación automática desde Wikidata', () => {
     expect(await run(db)).toMatchObject({ error: 'Tiempo de espera agotado' });
     expect((await run(db) as any).country).not.toBe('US');
   });
+
+  it('la importación continua desde el panel solo la usa el administrador e importa en cada ronda', async () => {
+    const db = await freshDb();
+    await db.query("UPDATE countries SET is_priority = (iso_code = 'ES')");
+    Object.assign(bulkSource, { page: vi.fn(async (iso: string) => ({ ...parseCompanies({ results: { bindings: [binding(5, 'Aceites Uno', { tel: '+34 965 111 222' })] } }, iso), httpStatus: 200, attempts: 1 })) });
+    const req = () => new NextRequest('http://localhost:3000/api/admin/run', { method: 'POST', headers: { host: 'localhost:3000', origin: 'http://localhost:3000', 'content-type': 'application/json' }, body: '{}' });
+    const ctx = { params: Promise.resolve({}) as Promise<any> };
+    setTestUser(null);
+    expect((await runRoute.POST(req(), ctx)).status).toBe(401);
+    const r = await db.query("INSERT INTO profiles (id, email, role) VALUES (gen_random_uuid(), 'a@x.example', 'admin') RETURNING id");
+    setTestUser({ id: r.rows[0].id, email: 'a@x.example', full_name: null, role: 'admin', is_blocked: false, companyIds: [] });
+    const res = await (await runRoute.POST(req(), ctx)).json();
+    setTestUser(undefined);
+    expect(res).toMatchObject({ total: 1, contactable: 1 });
+    expect(res.imported).toBeGreaterThanOrEqual(1);
+  }, 60_000);
 });
