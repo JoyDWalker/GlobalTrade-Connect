@@ -41,6 +41,7 @@ describe('consultas en lenguaje natural', () => {
     expect(p.types).toEqual(['fabricante']);
     expect(p.terms).toEqual(['envas', 'compostabl', 'cafe']);   // raíces: coinciden con singular y plural
     expect(parseQuery('importers of olive oil in Estados Unidos', countries)).toMatchObject({ countries: ['US'], types: ['importador'] });
+    expect(parseQuery('busco aceite de oliva en Colombia', countries).phrase).toBe('aceite de oliva');
   });
   it('exige más coincidencias en consultas cortas', () => {
     expect(minMatches(1)).toBe(1);

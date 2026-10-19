@@ -13,12 +13,18 @@ export interface CompanyHit {
   domain: string | null;
   snippet: string | null;
   countryCode?: string | null;
+  legalName?: string | null;
+  lei?: string | null;
+  city?: string | null;
+  address?: string | null;
   raw?: unknown;
 }
 export interface SearchResponse { hits: CompanyHit[]; httpStatus: number; attempts: number; billableRequests: number }
 export interface SearchAdapter {
   key: string;
   isConfigured(): boolean;
+  /** plain: palabras clave sin país ni relleno (registros y bases abiertas); web: consulta para buscadores */
+  queryStyle?: 'web' | 'plain';
   search(query: string, opts: { limit: number; country?: string | null; timeoutMs: number }): Promise<SearchResponse>;
 }
 
@@ -100,7 +106,6 @@ export const brave: SearchAdapter = {
   },
 };
 
-export const SEARCH_ADAPTERS: SearchAdapter[] = [brave, googleCse];
 
 // ───────── GLEIF: registro mundial de entidades legales (LEI), datos abiertos CC0 ─────────
 export interface RegistryRecord { lei: string; legalName: string; country: string | null; city: string | null; address: string | null; postalCode: string | null; status: string; registeredAs: string | null; url: string }
