@@ -54,9 +54,17 @@ const COMPANY_CLASSES = ['Q4830453', 'Q783794', 'Q6881511', 'Q891723', 'Q167037'
 const countryQidCache = new Map<string, string | null>();
 
 async function wd(params: Record<string, string>, timeoutMs: number) {
-  const u = new URL(WD);
-  for (const [k, v] of Object.entries({ format: 'json', maxlag: '5', ...params })) u.searchParams.set(k, v);
-  return json(u.toString(), timeoutMs);
+  // maxlag: Wikidata pide a los bots que esperen cuando sus servidores van con retraso; se respeta y se reintenta
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const u = new URL(WD);
+    for (const [k, v] of Object.entries({ format: 'json', maxlag: attempt === 3 ? '30' : '5', ...params })) u.searchParams.set(k, v);
+    const r = await json(u.toString(), timeoutMs);
+    const err = r.data?.error;
+    if (!err) return r;
+    if (err.code === 'maxlag' && attempt < 3) { await new Promise((res) => setTimeout(res, Math.min(4000, 1000 * attempt + (Number(err.lag) || 0) * 100))); continue; }
+    throw new SourceError(err.code === 'maxlag' ? 'rate_limited' : 'http', `Wikidata: ${err.code}`);
+  }
+  throw new SourceError('rate_limited', 'Wikidata: servidores con retraso, inténtalo más tarde');
 }
 
 async function countryQid(iso: string, timeoutMs: number) {
@@ -116,10 +124,13 @@ export const wikidataSearch: SearchAdapter = {
       const name = e.labels?.es?.value ?? e.labels?.en?.value;
       if (!name || claimValues(e, 'P576').length) continue;                       // sin nombre o disuelta
       const website = claimValues(e, 'P856')[0] as string | undefined;
+      const email = String(claimValues(e, 'P968')[0] ?? '').replace(/^mailto:/i, '').trim().toLowerCase() || null;
+      const phone = String(claimValues(e, 'P1329')[0] ?? '').trim() || null;
       const domain = website ? normalizeDomain(website) : null;
       hits.push({
         sourceKey: 'wikidata', externalId: `wikidata:${e.id}`, name: truncate(name, 150),
         url: website ?? null, domain: domain ? rootDomain(domain) : null,
+        email: email && /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(email) ? email : null, phone: phone && /^[+()\d\s.-]{6,40}$/.test(phone) ? phone : null,
         countryCode: iso.get(claimValues(e, 'P17')[0]?.id) ?? null,
         snippet: truncate(e.descriptions?.es?.value ?? e.descriptions?.en?.value ?? 'Empresa registrada en Wikidata', 300),
         raw: { qid: e.id, url: `https://www.wikidata.org/wiki/${e.id}` },

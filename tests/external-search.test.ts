@@ -45,6 +45,17 @@ describe('búsqueda externa', () => {
     expect(internal.items.map((c) => c.domain)).toContain('envases-norte.example');
   });
 
+  it('guarda el email y el teléfono que aporta la fuente y los completa si ya existía', async () => {
+    const db = await freshDb();
+    const { ingestHit } = await import('@/lib/search/external');
+    const src = (await db.query("SELECT id FROM sources WHERE key = 'wikidata'")).rows[0].id;
+    const r = await ingestHit(db, { sourceKey: 'wikidata', externalId: 'wikidata:Q1', name: 'Acme', url: 'https://acme.example', domain: 'acme.example', snippet: null, email: 'info@acme.example', phone: '+34 900 000 000' }, src);
+    const c = (await db.query('SELECT email, phone FROM companies WHERE id = $1', [r!.id])).rows[0];
+    expect(c).toEqual({ email: 'info@acme.example', phone: '+34 900 000 000' });
+    const prov = (await db.query("SELECT field FROM data_provenance WHERE company_id = $1 AND field IN ('email', 'phone')", [r!.id])).rows;
+    expect(prov).toHaveLength(2);
+  });
+
   it('si la fuente falla, no lanza y los datos guardados siguen disponibles', async () => {
     const db = await freshDb({ demo: true });
     const failing = fakeAdapter('brave', async () => { throw new SourceError('timeout', 'Tiempo de espera agotado'); });

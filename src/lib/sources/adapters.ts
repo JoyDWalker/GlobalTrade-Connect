@@ -17,6 +17,8 @@ export interface CompanyHit {
   lei?: string | null;
   city?: string | null;
   address?: string | null;
+  email?: string | null;
+  phone?: string | null;
   raw?: unknown;
 }
 export interface SearchResponse { hits: CompanyHit[]; httpStatus: number; attempts: number; billableRequests: number }
@@ -148,7 +150,36 @@ const meta = (html: string, attr: string, name: string) => {
   return tag ? decode(/content=["']([^"']*)["']/i.exec(tag)?.[1] ?? '') || null : null;
 };
 // Solo buzones corporativos genéricos: minimización de datos personales (RGPD)
-const ROLE_MAILBOX = /^(info|contact|contacto|contato|sales|ventas|vendas|export|exports|exportacion|comercial|commercial|hello|hola|office|oficina|admin|administracion|pedidos|orders|enquiries|inquiries|support|soporte|atencion|customer|service|servicio)[a-z0-9._-]*@/i;
+const ROLE_MAILBOX = /^(info|informacion|contact|contacto|contato|kontakt|sales|ventas|vendas|verkauf|vente|ventes|export|exports|exportacion|exportaciones|comex|trade|comercial|commercial|hello|hola|office|oficina|bureau|buero|mail|email|correo|admin|administracion|pedidos|orders|order|enquiries|inquiries|enquiry|consultas|clientes|customers|support|soporte|atencion|customer|service|servicio|servicios|compras|purchasing|empresa|company|general|recepcion|reception|welcome)[a-z0-9._-]*@/i;
+
+/** Texto visible aproximado (sin scripts, estilos ni etiquetas). */
+function visibleText(html: string) {
+  return decode(html.replace(/<(script|style|noscript|svg)[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ' ')).replace(/[ \t]+/g, ' ').slice(0, 400_000);
+}
+
+/** Emails del mismo dominio que la web y buzones genéricos de empresa (minimización de datos personales). */
+function cleanEmails(list: string[], domain: string | null) {
+  return [...new Set(list.map((e) => e.trim().toLowerCase().replace(/[.,;:)]+$/, '')))]
+    .filter((e) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(e) && !/\.(png|jpe?g|gif|webp|svg)$/.test(e) && domain && normalizeDomain(e)
+      && rootDomain(normalizeDomain(e)!) === rootDomain(domain) && ROLE_MAILBOX.test(e))
+    .slice(0, 4);
+}
+
+/** Teléfonos con entre 7 y 15 dígitos, sin duplicados por dígitos. */
+function cleanPhones(list: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    const p = raw.replace(/\s+/g, ' ').replace(/[\s.\/-]+$/, '').trim();
+    const digits = p.replace(/\D/g, '');
+    if (digits.length < 7 || digits.length > 15 || /^(\d)\1+$/.test(digits) || /^(19|20)\d{2}\d*$/.test(digits) && digits.length <= 8) continue;
+    if (seen.has(digits.slice(-9))) continue;
+    seen.add(digits.slice(-9));
+    out.push(p);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
 
 export function parseSite(html: string, pageUrl: string): Omit<SiteInfo, 'finalUrl' | 'status' | 'redirected'> {
   const domain = normalizeDomain(pageUrl);
@@ -177,12 +208,15 @@ export function parseSite(html: string, pageUrl: string): Omit<SiteInfo, 'finalU
       out.sameAs.push(...[].concat(n.sameAs ?? []).filter((s: unknown) => typeof s === 'string'));
     }
   }
-  for (const m of html.matchAll(/mailto:([^"'?\s>]+)/gi)) out.emails.push(decodeURIComponent(m[1]));
-  for (const m of html.matchAll(/href=["']tel:([+\d\s().-]{6,25})["']/gi)) out.phones.push(m[1].trim());
-  // Emails: mismo dominio que la web y buzón genérico de empresa
-  out.emails = [...new Set(out.emails.map((e) => e.trim().toLowerCase()))]
-    .filter((e) => /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(e) && domain && normalizeDomain(e) && rootDomain(normalizeDomain(e)!) === rootDomain(domain) && ROLE_MAILBOX.test(e)).slice(0, 3);
-  out.phones = [...new Set(out.phones)].slice(0, 3);
+  for (const m of html.matchAll(/mailto:([^"'?\s>]+)/gi)) { try { out.emails.push(decodeURIComponent(m[1])); } catch { /* codificación inválida */ } }
+  for (const m of html.matchAll(/href=["']tel:([+\d\s().%-]{6,30})["']/gi)) { try { out.phones.push(decodeURIComponent(m[1]).trim()); } catch { /* */ } }
+  // Texto visible: emails y teléfonos escritos en la página (pie, página de contacto, aviso legal…)
+  const text = visibleText(html);
+  for (const m of text.matchAll(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)) out.emails.push(m[0]);
+  for (const m of text.matchAll(/(?:tel(?:[ée]fono|efone|ephone)?|phone|fono|t\.|call|llámanos|llamenos)\s*[.:]?\s*((?:\+|00)?[\d][\d\s().\/-]{6,22}\d)/gi)) out.phones.push(m[1]);
+  for (const m of text.matchAll(/(?<![\w\d])\+\d{1,3}[\s.-]?\(?\d{1,4}\)?(?:[\s.-]?\d{2,4}){2,4}(?![\w\d])/g)) out.phones.push(m[0]);
+  out.emails = cleanEmails(out.emails, domain);
+  out.phones = cleanPhones(out.phones);
   out.sameAs = [...new Set(out.sameAs)].slice(0, 10);
   if (out.description) out.description = truncate(out.description, 500);
   return out;
@@ -208,9 +242,50 @@ export async function fetchSiteInfo(website: string, timeoutMs = 8000): Promise<
   const url = new URL(website);
   if (!(await robotsAllows(url, timeoutMs))) throw new SourceError('blocked', 'robots.txt no permite rastrear esta página');
   const page = await fetchPublicPage(url.toString(), { timeoutMs });
+  if (page.status === 401 || page.status === 403 || page.status === 429) throw new SourceError('blocked', `La web no permite el acceso automatizado (HTTP ${page.status})`, page.status);
   if (page.status >= 400) throw new SourceError('http', `La web respondió HTTP ${page.status}`, page.status);
   if (!/html/i.test(page.contentType)) throw new SourceError('invalid', 'La página no es HTML');
-  return { finalUrl: page.url, status: page.status, redirected: page.redirected, ...parseSite(page.body, page.url) };
+  const info = parseSite(page.body, page.url);
+  // Páginas de contacto / aviso legal del mismo sitio (donde suelen publicarse email y teléfono)
+  if (info.emails.length < 2 || !info.phones.length) {
+    for (const link of contactLinks(page.body, page.url).slice(0, 3)) {
+      try {
+        const u = new URL(link);
+        if (!(await robotsAllows(u, timeoutMs))) continue;
+        const p = await fetchPublicPage(link, { timeoutMs: Math.min(timeoutMs, 6000) });
+        if (p.status >= 400 || !/html/i.test(p.contentType)) continue;
+        const extra = parseSite(p.body, p.url);
+        info.emails = cleanEmails([...info.emails, ...extra.emails], normalizeDomain(page.url));
+        info.phones = cleanPhones([...info.phones, ...extra.phones]);
+        info.address ??= extra.address;
+        info.legalName ??= extra.legalName;
+        if (info.emails.length >= 2 && info.phones.length) break;
+      } catch { /* una página secundaria que falla no invalida el resto */ }
+    }
+  }
+  return { finalUrl: page.url, status: page.status, redirected: page.redirected, ...info };
+}
+
+const CONTACT_WORDS = /contact|contacto|contato|kontakt|impressum|aviso-legal|aviso_legal|legal-notice|mentions-legales|about|quienes|nosotros|sobre|empresa|company|ubicacion|location|sede/i;
+
+/** Enlaces internos a páginas de contacto, ordenados por relevancia. */
+export function contactLinks(html: string, pageUrl: string) {
+  const base = new URL(pageUrl);
+  const root = rootDomain(base.hostname.replace(/^www\./, ''));
+  const found = new Map<string, number>();
+  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const label = m[2].replace(/<[^>]+>/g, ' ');
+    if (!CONTACT_WORDS.test(m[1]) && !CONTACT_WORDS.test(label)) continue;
+    let u: URL;
+    try { u = new URL(m[1], base); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol) || rootDomain(u.hostname.replace(/^www\./, '')) !== root || u.toString() === base.toString()) continue;
+    if (/\.(pdf|jpe?g|png|zip|docx?)$/i.test(u.pathname)) continue;
+    const score = /contact|contacto|contato|kontakt/i.test(m[1] + label) ? 3 : /impressum|legal|mentions/i.test(m[1] + label) ? 2 : 1;
+    u.hash = '';
+    const k = u.toString();
+    found.set(k, Math.max(found.get(k) ?? 0, score));
+  }
+  return [...found.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
 }
 
 /** Comprobación ligera de un enlace (para el worker de enlaces). */

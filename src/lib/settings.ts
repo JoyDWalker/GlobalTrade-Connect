@@ -6,7 +6,7 @@ import { defaultSettings } from './seed/catalog';
 export interface Settings {
   external_search: { enabled: boolean; min_internal_results: number; max_results_per_source: number; cache_hours: number; timeout_ms: number };
   limits: { searches_per_hour_anon: number; searches_per_hour_user: number; external_per_day_anon: number; external_per_day_user: number; daily_budget_usd: number };
-  worker: { batch_size: number; time_budget_ms: number; stale_after_days: number; link_check_after_days: number; stuck_after_minutes: number };
+  worker: { batch_size: number; time_budget_ms: number; stale_after_days: number; link_check_after_days: number; stuck_after_minutes: number; concurrency: number };
   discovery_queries: string[];
 }
 const DEFAULTS = Object.fromEntries(defaultSettings.map(([k, v]) => [k, v])) as unknown as Settings;

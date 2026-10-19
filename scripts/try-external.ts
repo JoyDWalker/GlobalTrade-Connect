@@ -5,6 +5,7 @@ import { setDb } from '../src/lib/db';
 import { migrate } from '../src/lib/migrations';
 import { seedCatalog } from '../src/lib/seed';
 import { runExternalSearch } from '../src/lib/search/external';
+import { runWorker } from '../src/lib/jobs/worker';
 
 process.env.APP_SECRET ??= 'local-try-external-secret-local-try-external';
 process.env.DATABASE_URL ??= 'postgres://unused@localhost/unused';
@@ -18,5 +19,12 @@ for (const query of process.argv.slice(2)) {
   console.log(`\n«${query}» → ${r.status}${r.reason ? ` (${r.reason})` : ''}`);
   for (const s of r.sources) console.log(`  ${s.key.padEnd(10)} ${s.status}${s.results ? ` · ${s.results}` : ''}${s.message ? ` · ${s.message}` : ''}`);
   for (const c of r.items.slice(0, 8)) console.log(`   - ${c.name} (${c.country_code ?? '?'}) ${c.domain ?? ''} [${c.sources.join(',')}]`);
+}
+if (process.env.ENRICH) {
+  const w = await runWorker(db, { timeBudgetMs: 60_000, schedule: false, types: ['enrich_company'] });
+  console.log(`
+Webs visitadas: ${w.processed.length} (${w.processed.filter((p) => !p.ok).length} con error)`);
+  const rows = (await db.query("SELECT name, website, email, phone, website_status FROM companies WHERE website IS NOT NULL ORDER BY name")).rows as any[];
+  for (const r of rows) console.log(`   - ${r.name}: ${r.email ?? '—'} · ${r.phone ?? '—'} [${r.website_status}]`);
 }
 await db.close();

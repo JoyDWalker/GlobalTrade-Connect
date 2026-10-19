@@ -201,8 +201,8 @@ export async function scheduleRecurring(db: Db, now = new Date()) {
 
 export interface RunResult { scheduled: number; recovered: number; processed: { id: number; type: string; ok: boolean; ms: number; error?: string }[] }
 
-/** Ejecuta tareas hasta agotar el presupuesto de tiempo. Seguro con varias instancias a la vez. */
-export async function runWorker(db: Db, { timeBudgetMs, schedule = true, workerId = `${os.hostname()}:${process.pid}`, maxJobs = 100 }: { timeBudgetMs?: number; schedule?: boolean; workerId?: string; maxJobs?: number } = {}): Promise<RunResult> {
+/** Ejecuta tareas hasta agotar el presupuesto de tiempo, con varias en paralelo. Seguro con varias instancias a la vez. */
+export async function runWorker(db: Db, { timeBudgetMs, schedule = true, workerId = `${os.hostname()}:${process.pid}`, maxJobs = 100, concurrency, types }: { timeBudgetMs?: number; schedule?: boolean; workerId?: string; maxJobs?: number; concurrency?: number; types?: string[] } = {}): Promise<RunResult> {
   const cfg = await getSetting(db, 'worker');
   const budget = timeBudgetMs ?? cfg.time_budget_ms;
   const deadline = Date.now() + budget;
@@ -210,27 +210,32 @@ export async function runWorker(db: Db, { timeBudgetMs, schedule = true, workerI
   if (recovered) log.warn('Tareas interrumpidas recuperadas', { recovered });
   const scheduled = schedule ? await scheduleRecurring(db) : 0;
   const processed: RunResult['processed'] = [];
-  while (Date.now() < deadline - 5000 && processed.length < maxJobs) {
-    const job = await claimNext(db, workerId);
-    if (!job) break;
-    const started = Date.now();
-    const handler = HANDLERS[job.type];
-    try {
-      if (!handler) throw new Error(`Tipo de tarea desconocido: ${job.type}`);
-      const result = await Promise.race([
-        handler({ db, job, deadline }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('Tiempo máximo de la tarea agotado')), Math.max(1000, deadline - Date.now()))),
-      ]);
-      await completeJob(db, job.id, result);
-      processed.push({ id: job.id, type: job.type, ok: true, ms: Date.now() - started });
-    } catch (e) {
-      const msg = (e as Error).message ?? String(e);
-      const final = await failJob(db, job, msg);
-      processed.push({ id: job.id, type: job.type, ok: false, ms: Date.now() - started, error: msg });
-      log.warn('Tarea fallida', { job: job.id, type: job.type, attempts: job.attempts, final, error: msg });
-      if (final) await alert(`Tarea ${job.type} #${job.id} fallida definitivamente`, { error: msg });
+  let claimed = 0;
+  const lane = async () => {
+    while (Date.now() < deadline - 5000 && claimed < maxJobs) {
+      claimed++;
+      const job = await claimNext(db, workerId, types);
+      if (!job) { claimed--; return; }
+      const started = Date.now();
+      const handler = HANDLERS[job.type];
+      try {
+        if (!handler) throw new Error(`Tipo de tarea desconocido: ${job.type}`);
+        const result = await Promise.race([
+          handler({ db, job, deadline }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('Tiempo máximo de la tarea agotado')), Math.max(1000, deadline - Date.now()))),
+        ]);
+        await completeJob(db, job.id, result);
+        processed.push({ id: job.id, type: job.type, ok: true, ms: Date.now() - started });
+      } catch (e) {
+        const msg = (e as Error).message ?? String(e);
+        const final = await failJob(db, job, msg);
+        processed.push({ id: job.id, type: job.type, ok: false, ms: Date.now() - started, error: msg });
+        log.warn('Tarea fallida', { job: job.id, type: job.type, attempts: job.attempts, final, error: msg });
+        if (final) await alert(`Tarea ${job.type} #${job.id} fallida definitivamente`, { error: msg });
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, concurrency ?? cfg.concurrency ?? 1) }, lane));
   return { scheduled, recovered, processed };
 }
 
