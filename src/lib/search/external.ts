@@ -9,7 +9,8 @@ import { hit } from '../rate-limit';
 import { normalize } from '../text';
 import { companyCards, countryNameMap, findDuplicate, refreshSearchText, type CompanyCard } from '../services/companies';
 import { enqueue } from '../jobs/queue';
-import { SEARCH_ADAPTERS, type CompanyHit, type SearchAdapter } from '../sources/adapters';
+import type { CompanyHit, SearchAdapter } from '../sources/adapters';
+import { SEARCH_ADAPTERS } from '../sources/registry';
 import { SourceError } from '../sources/http';
 import { parseQuery } from './query';
 
@@ -50,26 +51,28 @@ async function logRequest(q: Queryable, r: { sourceId: number; purpose: string; 
  */
 export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promise<{ id: string; created: boolean } | null> {
   if (!h.name || h.name.length < 2) return null;
+  const srcUrl = h.url ?? ((h.raw as any)?.url as string | undefined) ?? null;
   return db.tx(async (q) => {
     const existing = await one<{ company_id: string }>(q, 'SELECT company_id FROM company_sources WHERE source_id = $1 AND external_id = $2', [sourceId, h.externalId]);
-    const dup = existing ? { existing: { id: existing.company_id } } : await findDuplicate(q, { domain: h.domain });
+    const dup = existing ? { existing: { id: existing.company_id } } : await findDuplicate(q, { domain: h.domain, lei: h.lei ?? null });
     if (dup) {
       const id = dup.existing.id;
       await q.query(`INSERT INTO company_sources (company_id, source_id, external_id, source_url, title, snippet, raw) VALUES ($1,$2,$3,$4,$5,$6,$7)
         ON CONFLICT (source_id, external_id) DO UPDATE SET last_seen_at = now(), snippet = EXCLUDED.snippet, title = EXCLUDED.title`,
-      [id, sourceId, h.externalId, h.url, h.name, h.snippet, JSON.stringify(h.raw ?? null)]);
+      [id, sourceId, h.externalId, srcUrl, h.name, h.snippet, JSON.stringify(h.raw ?? null)]);
       return { id, created: false };
     }
     const slugBase = normalize(h.name).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 70) || 'empresa';
     let slug = slugBase;
     for (let i = 2; await one(q, 'SELECT 1 FROM companies WHERE slug = $1', [slug]); i++) slug = `${slugBase}-${i}`;
-    const row = await one<{ id: string }>(q, `INSERT INTO companies (slug, name, website, domain, country_code, record_status, verification_level, origin, description)
-      VALUES ($1,$2,$3,$4,$5,'detected','none','external',NULL) RETURNING id`, [slug, h.name, h.url, h.domain, h.countryCode ?? null]);
+    const country = h.countryCode && (await one(q, 'SELECT 1 FROM countries WHERE iso_code = $1', [h.countryCode])) ? h.countryCode : null;
+    const row = await one<{ id: string }>(q, `INSERT INTO companies (slug, name, legal_name, lei, city, address, website, domain, country_code, record_status, verification_level, origin, description)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'detected','none','external',NULL) RETURNING id`, [slug, h.name, h.legalName ?? null, h.lei ?? null, h.city ?? null, h.address ?? null, h.url, h.domain, country]);
     const id = row!.id;
     await q.query(`INSERT INTO company_sources (company_id, source_id, external_id, source_url, title, snippet, raw) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [id, sourceId, h.externalId, h.url, h.name, h.snippet, JSON.stringify(h.raw ?? null)]);
-    for (const [field, value] of [['name', h.name], ['website', h.url], ['country_code', h.countryCode]] as const) {
-      if (value) await q.query("INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,'detected')", [id, field, value, sourceId, h.url]);
+      [id, sourceId, h.externalId, srcUrl, h.name, h.snippet, JSON.stringify(h.raw ?? null)]);
+    for (const [field, value] of [['name', h.name], ['legal_name', h.legalName], ['lei', h.lei], ['city', h.city], ['address', h.address], ['website', h.url], ['country_code', country]] as const) {
+      if (value) await q.query("INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,'detected')", [id, field, value, sourceId, srcUrl]);
     }
     await refreshSearchText(q, id);
     // El snippet ayuda a encontrarla, pero no se presenta como descripción verificada
@@ -128,7 +131,7 @@ export async function runExternalSearch(db: Db, req: ExternalRequest, adapters: 
     if (!usage.allowed) return empty('skipped', 'Has alcanzado tu límite diario de búsquedas externas');
 
     const srcRows = await many<{ id: number; key: string; name: string; enabled: boolean; daily_quota: number | null; cost_per_1000_usd: string; reliability: number }>(db,
-      "SELECT id, key, name, enabled, daily_quota, cost_per_1000_usd, reliability FROM sources WHERE kind = 'search_api' ORDER BY reliability DESC");
+      "SELECT id, key, name, enabled, daily_quota, cost_per_1000_usd, reliability FROM sources WHERE key = ANY($1::text[]) ORDER BY reliability DESC", [adapters.map((a) => a.key)]);
     const results: ExternalOutcome['sources'] = [];
     const tasks: Promise<{ src: (typeof srcRows)[number]; status: SourceStatus; hits: CompanyHit[]; message?: string }>[] = [];
     const overBudget = (await spentTodayUsd(db)) >= limits.daily_budget_usd;
@@ -143,7 +146,8 @@ export async function runExternalSearch(db: Db, req: ExternalRequest, adapters: 
       if (!src.enabled) { results.push({ key: src.key, name: src.name, status: 'disabled', results: 0 }); continue; }
       if (!adapter.isConfigured()) { results.push({ key: src.key, name: src.name, status: 'not_configured', results: 0 }); continue; }
       if (overBudget && Number(src.cost_per_1000_usd) > 0) { results.push({ key: src.key, name: src.name, status: 'budget_exceeded', results: 0 }); continue; }
-      tasks.push(runAdapter(db, adapter, src, req, apiQuery, cfg.max_results_per_source, cfg.timeout_ms, cfg.cache_hours).then((r) => ({ src, ...r })));
+      const q = adapter.queryStyle === 'plain' ? parsed.phrase || parsed.words.join(' ') : apiQuery;
+      tasks.push(runAdapter(db, adapter, src, { ...req, country }, q, cfg.max_results_per_source, cfg.timeout_ms, cfg.cache_hours).then((r) => ({ src, ...r })));
     }
 
     // Tiempo máximo global: lo que no termine a tiempo se descarta (los registros quedan para la próxima vez)

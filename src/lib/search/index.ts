@@ -6,11 +6,11 @@ import { getSetting } from '../settings';
 import { hit } from '../rate-limit';
 import { searchCompanies } from '../services/companies';
 import type { SearchParams } from '../validation';
-import { SEARCH_ADAPTERS } from '../sources/adapters';
+import { SEARCH_ADAPTERS } from '../sources/registry';
 import type { SessionUser } from '../auth/session';
 
 export async function externalAvailable(db: Db) {
-  const enabled = await many<{ key: string }>(db, "SELECT key FROM sources WHERE kind = 'search_api' AND enabled");
+  const enabled = await many<{ key: string }>(db, 'SELECT key FROM sources WHERE enabled AND key = ANY($1::text[])', [SEARCH_ADAPTERS.map((a) => a.key)]);
   return SEARCH_ADAPTERS.some((a) => a.isConfigured() && enabled.some((e) => e.key === a.key));
 }
 

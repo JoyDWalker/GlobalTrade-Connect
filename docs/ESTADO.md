@@ -1,4 +1,6 @@
-# Estado del proyecto (18 de octubre de 2026)
+# Estado del proyecto (19 de octubre de 2026)
+
+> **Producción**: https://global-trade-connect-three.vercel.app (Vercel + Supabase). /api/health: base de datos conectada, 2 migraciones aplicadas. Fuentes externas activas: GLEIF y Wikidata (gratuitas). Brave Search: pendiente de clave.
 
 Se distingue entre **implementado y probado en local**, **configurado pero no verificado contra el servicio real** y **pendiente**.
 

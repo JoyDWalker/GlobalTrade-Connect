@@ -29,6 +29,10 @@ const singular = (w: string) => (w.length > 5 && w.endsWith('es') ? w.slice(0, -
 export interface ParsedQuery {
   normalized: string;
   terms: string[];
+  /** Palabras útiles sin reducir a raíz (para APIs externas) */
+  words: string[];
+  /** Frase útil en su orden original ("aceite de oliva"), sin país, tipo ni palabras vacías en los extremos */
+  phrase: string;
   countries: string[];
   types: string[];
 }
@@ -50,15 +54,20 @@ export function parseQuery(raw: string, countryNames: Map<string, string> = new 
   }
   const types: string[] = [];
   const terms: string[] = [];
+  const words: string[] = [];
+  const kept: string[] = [];
   for (const word of text.split(' ')) {
     if (!word) continue;
     const t = TYPE_WORDS[word] || TYPE_WORDS[word.replace(/s$/, '')] || TYPE_WORDS[word.replace(/es$/, '')];
     if (t) { if (!types.includes(t)) types.push(t); continue; }
+    kept.push(word);
     if (STOPWORDS.has(word) || word.length < 2) continue;
     const s = singular(word);
-    if (!terms.includes(s)) terms.push(s);
+    if (!terms.includes(s)) { terms.push(s); words.push(word); }
   }
-  return { normalized: normalizedQuery, terms: terms.slice(0, 8), countries: [...new Set(countries)], types };
+  while (kept.length && STOPWORDS.has(kept[0])) kept.shift();
+  while (kept.length && STOPWORDS.has(kept[kept.length - 1])) kept.pop();
+  return { normalized: normalizedQuery, terms: terms.slice(0, 8), words: words.slice(0, 8), phrase: kept.slice(0, 10).join(' '), countries: [...new Set(countries)], types };
 }
 
 /** Número mínimo de términos que deben coincidir: todos si son pocos, ~60 % si la consulta es larga. */

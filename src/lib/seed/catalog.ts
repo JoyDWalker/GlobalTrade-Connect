@@ -116,7 +116,10 @@ export const sources = [
     notes: 'De pago por uso (aprox. 5 USD/1.000 consultas, con un crédito mensual). Verifica precio y condiciones actuales en su panel.' },
   { key: 'gleif', name: 'GLEIF – Registro mundial LEI', kind: 'registry', reliability: 90, cost: 0, quota: 2000,
     base_url: 'https://api.gleif.org/api/v1', terms_url: 'https://www.gleif.org/en/meta/terms-of-use', licence: 'CC0 1.0',
-    notes: 'Datos abiertos (CC0) de entidades legales con código LEI. Cobertura limitada a entidades con LEI.' },
+    notes: 'Datos abiertos (CC0) de entidades legales con código LEI. Se usa para buscar por nombre legal y para verificar. Cobertura limitada a entidades con LEI.' },
+  { key: 'wikidata', name: 'Wikidata', kind: 'directory', reliability: 55, cost: 0, quota: 500,
+    base_url: 'https://www.wikidata.org/w/api.php', terms_url: 'https://www.wikidata.org/wiki/Wikidata:Data_access', licence: 'CC0 1.0',
+    notes: 'Base de conocimiento abierta. Busca empresas por sector o producto y país. Cobertura centrada en empresas conocidas.' },
   { key: 'website', name: 'Sitio web oficial de la empresa', kind: 'website', reliability: 60, cost: 0, quota: 1000,
     notes: 'Metadatos públicos (título, descripción, JSON-LD Organization). Respeta robots.txt.' },
 ] as const;

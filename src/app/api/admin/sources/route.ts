@@ -2,7 +2,7 @@ import { api } from '@/lib/api';
 import { getDb, many } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth/session';
 import { sourceUsage } from '@/lib/services/admin';
-import { SEARCH_ADAPTERS } from '@/lib/sources/adapters';
+import { SEARCH_ADAPTERS } from '@/lib/sources/registry';
 
 export const dynamic = 'force-dynamic';
 

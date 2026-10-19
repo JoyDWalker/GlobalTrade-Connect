@@ -81,6 +81,9 @@ Sin dominio verificado, deja `EMAIL_PROVIDER=log`: los emails se registran en **
 
 ## 6. Búsqueda externa
 
+- **GLEIF** y **Wikidata** están activas por defecto (gratuitas, licencia CC0, sin clave). GLEIF busca entidades legales por nombre en todo el mundo; Wikidata, empresas por sector/producto y país (sobre todo empresas conocidas).
+- La app también acepta las variables que crea la integración Supabase de Vercel (`POSTGRES_URL`, `SUPABASE_URL`…, con o sin prefijo como `GTC_`).
+
 - **Brave Search API**: crea una clave en https://api-dashboard.search.brave.com/ → `BRAVE_SEARCH_API_KEY`. Es de pago por uso; ajusta en **Admin → Fuentes** la cuota diaria y el coste por 1.000 peticiones, y en **Admin → Ajustes** el presupuesto diario y los límites por usuario.
 - **Google Custom Search JSON API**: Google indica que está cerrada a clientes nuevos y que las cuentas existentes deben migrar antes del 1 de enero de 2027. Si ya tienes acceso: `GOOGLE_CSE_API_KEY` y `GOOGLE_CSE_ENGINE_ID`.
 - **GLEIF** (registro mundial de entidades legales) no necesita clave.
