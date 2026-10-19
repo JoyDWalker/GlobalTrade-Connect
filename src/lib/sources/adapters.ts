@@ -107,6 +107,24 @@ export const serper: SearchAdapter = {
   },
 };
 
+/** Ficha de Google Maps vía Serper: teléfono, web y dirección públicos de un negocio. */
+export interface PlaceResult { title: string; address: string | null; phone: string | null; website: string | null; url: string | null }
+export async function serperPlaces(query: string, { country, timeoutMs }: { country?: string | null; timeoutMs: number }): Promise<{ places: PlaceResult[]; httpStatus: number; attempts: number }> {
+  const body: Record<string, unknown> = { q: query, hl: 'es' };
+  if (country) body.gl = country.toLowerCase();
+  const { res, attempts } = await fetchWithRetry('https://google.serper.dev/places', {
+    timeoutMs, retries: 2, method: 'POST', body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', 'X-API-KEY': env().SERPER_API_KEY! },
+  });
+  const text = await res.text();
+  if (!res.ok) throw statusError('Serper', res.status, text);
+  const places = (JSON.parse(text).places ?? []).map((p: any) => ({
+    title: String(p.title ?? ''), address: p.address ?? null, phone: p.phoneNumber ?? null, website: p.website ?? null,
+    url: p.cid ? `https://www.google.com/maps?cid=${p.cid}` : null,
+  }));
+  return { places, httpStatus: res.status, attempts };
+}
+
 // ───────── Brave Search API ─────────
 export const brave: SearchAdapter = {
   key: 'brave',

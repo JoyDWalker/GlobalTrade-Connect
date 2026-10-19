@@ -31,7 +31,7 @@ export interface ExternalRequest { query: string; country?: string | null; actor
 const cacheKey = (source: string, query: string, country?: string | null) =>
   crypto.createHash('sha256').update(`${source}|${normalize(query)}|${country ?? ''}`).digest('hex');
 
-async function spentTodayUsd(q: Queryable) {
+export async function spentTodayUsd(q: Queryable) {
   // APIs de búsqueda + IA
   const r = await one<{ usd: string }>(q, `SELECT (SELECT coalesce(sum(cost_usd), 0) FROM external_requests WHERE created_at >= date_trunc('day', now()))
     + (SELECT coalesce(sum(cost_usd), 0) FROM ai_requests WHERE created_at >= date_trunc('day', now())) AS usd`);
@@ -86,8 +86,8 @@ export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promis
     if (h.snippet) await q.query("UPDATE companies SET search_text = search_text || ' ' || $2 WHERE id = $1", [id, normalize(h.snippet)]);
     await q.query(`INSERT INTO review_tasks (company_id, kind, priority, details, dedupe_key) VALUES ($1, 'new_detected', 20, $2, $3)
       ON CONFLICT (dedupe_key) WHERE status = 'open' AND dedupe_key IS NOT NULL DO NOTHING`, [id, JSON.stringify({ source: h.sourceKey, url: h.url }), `new_detected:${id}`]);
-    // Visitar su web para obtener email y teléfono corporativos publicados
-    if (h.url) await enqueue(q, 'enrich_company', { companyId: id }, { dedupeKey: `enrich:${id}`, priority: 60 });
+    // Obtener email y teléfono corporativos: visitando su web o, si no se conoce, buscándola por nombre
+    await enqueue(q, 'enrich_company', { companyId: id }, { dedupeKey: `enrich:${id}`, priority: 60 });
     return { id, created: true };
   });
 }

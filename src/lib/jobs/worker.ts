@@ -8,11 +8,13 @@ import { getSetting } from '../settings';
 import { canonicalName, normalize, normalizeDomain } from '../text';
 import { flushOutbox } from '../email';
 import { cleanupRateLimits } from '../rate-limit';
-import { checkLink, fetchSiteInfo, gleifLookup } from '../sources/adapters';
+import { brave, checkLink, fetchSiteInfo, gleifLookup, googleCse, serper } from '../sources/adapters';
+import { findContacts } from '../sources/find-contacts';
 import { SourceError } from '../sources/http';
 import { refreshSearchText, searchCompanies } from '../services/companies';
 import { searchParamsSchema } from '../validation';
-import { runExternalSearch } from '../search/external';
+import { runExternalSearch, spentTodayUsd } from '../search/external';
+import { findDuplicate } from '../services/companies';
 import { claimNext, completeJob, enqueue, enqueueOncePerPeriod, failJob, recoverStuck, type Job } from './queue';
 
 type Ctx = { db: Db; job: Job; deadline: number };
@@ -25,11 +27,64 @@ async function openTask(db: Db, companyId: string | null, kind: string, details:
     ON CONFLICT (dedupe_key) WHERE status = 'open' AND dedupe_key IS NOT NULL DO NOTHING`, [companyId, kind, priority, JSON.stringify(details), dedupeKey]);
 }
 
+/** Dependencias de la búsqueda de contactos (sustituibles en pruebas). */
+export const contactSearch = { find: findContacts, webAdapters: () => [serper, brave, googleCse].filter((a) => a.isConfigured()) };
+
+/**
+ * Empresa detectada sin web: busca su web y teléfono por nombre y ciudad (Google Maps vía Serper y buscador web).
+ * Respeta el presupuesto diario y deja constancia de cada llamada y de la procedencia de cada dato.
+ */
+async function searchMissingContacts(db: Db, c: any, jobId: number) {
+  const adapters = contactSearch.webAdapters();
+  const srcs = await many<{ id: number; key: string; enabled: boolean; cost_per_1000_usd: string }>(db, 'SELECT id, key, enabled, cost_per_1000_usd FROM sources WHERE key = ANY($1::text[])', [adapters.map((a) => a.key)]);
+  const usable = adapters.filter((a) => srcs.find((s) => s.key === a.key)?.enabled);
+  if (!usable.length) return { skipped: 'sin web y sin buscador configurado' };
+  if ((await spentTodayUsd(db)) >= (await getSetting(db, 'limits')).daily_budget_usd) return { skipped: 'presupuesto diario de APIs agotado' };
+
+  const r = await contactSearch.find({ name: c.name, city: c.city, country_code: c.country_code }, { webAdapters: usable, usePlaces: usable.some((a) => a.key === 'serper') });
+  for (const call of r.calls) {
+    const src = srcs.find((s) => s.key === call.sourceKey);
+    if (!src) continue;
+    await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, results, cost_usd, error, job_id) VALUES ($1,'enrich',$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [src.id, call.query.slice(0, 300), call.status, call.httpStatus ?? null, call.ms, call.results, call.status === 'ok' ? Number(src.cost_per_1000_usd) / 1000 : 0, call.error?.slice(0, 500) ?? null, jobId]);
+  }
+  const updates: Record<string, string> = {};
+  if (r.website) {
+    const domain = normalizeDomain(r.website);
+    // Si otra ficha ya tiene ese dominio no se asigna (lo resolverá la detección de duplicados)
+    if (domain && !(await findDuplicate(db, { domain }, c.id))) { updates.website = r.website; updates.domain = domain; }
+  }
+  if (r.phone && !c.phone) updates.phone = r.phone.slice(0, 60);
+  if (r.address && !c.address) updates.address = r.address.slice(0, 200);
+  const srcId = srcs.find((s) => s.key === r.sourceKey)?.id ?? null;
+  await db.tx(async (q) => {
+    const keys = Object.keys(updates);
+    await q.query(`UPDATE companies SET contacts_searched_at = now()${keys.map((k, i) => `, ${k} = $${i + 2}`).join('')} WHERE id = $1`, [c.id, ...keys.map((k) => updates[k])]);
+    for (const k of keys.filter((k) => k !== 'domain')) {
+      await q.query("INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,'detected')", [c.id, k, updates[k], srcId, r.sourceUrl]);
+    }
+    if (keys.length) {
+      await q.query("INSERT INTO company_changes (company_id, change_source, changes) VALUES ($1, 'worker', $2)",
+        [c.id, JSON.stringify(Object.fromEntries(keys.map((k) => [k, { from: c[k] ?? null, to: updates[k] }])))]);
+      await refreshSearchText(q, c.id);
+    }
+  });
+  return { found: Object.keys(updates).filter((k) => k !== 'domain'), website: updates.website ?? null };
+}
+
 export const HANDLERS: Record<string, Handler> = {
   /** Completa una ficha con los metadatos públicos de su web oficial (sin sobrescribir datos declarados). */
   async enrich_company({ db, job }) {
-    const c = await one<any>(db, 'SELECT id, name, website, description, email, phone, legal_name, address, city, region, postal_code, logo_url, origin, record_status FROM companies WHERE id = $1 AND deleted_at IS NULL', [job.payload.companyId]);
-    if (!c?.website) return { skipped: 'sin web' };
+    const c = await one<any>(db, 'SELECT id, name, website, description, email, phone, legal_name, address, city, region, postal_code, country_code, logo_url, origin, record_status FROM companies WHERE id = $1 AND deleted_at IS NULL', [job.payload.companyId]);
+    if (!c) return { skipped: 'no existe' };
+    // Sin web (p. ej. llegó de GLEIF): primero se busca su web y teléfono por nombre
+    let search: Awaited<ReturnType<typeof searchMissingContacts>> | null = null;
+    if (!c.website) {
+      if (c.origin !== 'external') return { skipped: 'sin web' };
+      search = await searchMissingContacts(db, c, job.id);
+      if (!('website' in search) || !search.website) return search;
+      Object.assign(c, await one<any>(db, 'SELECT website, phone, address FROM companies WHERE id = $1', [c.id]));
+    }
     const src = await sourceId(db, 'website');
     const started = Date.now();
     try {
@@ -57,7 +112,7 @@ export const HANDLERS: Record<string, Handler> = {
           [c.id, JSON.stringify({ url: info.finalUrl, status: info.status }), src]);
         await refreshSearchText(q, c.id);
       });
-      return { updated: Object.keys(updates) };
+      return { updated: Object.keys(updates), ...(search ? { searched: search } : {}) };
     } catch (e) {
       const se = e as SourceError;
       await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, error, job_id) VALUES ($1,'enrich',$2,$3,$4,$5,$6,$7)`,
@@ -66,6 +121,20 @@ export const HANDLERS: Record<string, Handler> = {
       if (se.kind === 'blocked') return { skipped: se.message };     // robots.txt o dirección no pública: no se reintenta
       throw e;
     }
+  },
+
+  /** Programa la búsqueda de teléfono y correo de las empresas detectadas que aún no tienen ninguno. */
+  async fill_contacts({ db }) {
+    const cfg = await getSetting(db, 'worker');
+    const canSearch = contactSearch.webAdapters().length > 0;
+    const rows = await many<{ id: string }>(db, `SELECT id FROM companies
+      WHERE deleted_at IS NULL AND is_demo = false AND origin = 'external' AND record_status IN ('published', 'detected') AND email IS NULL AND phone IS NULL
+        AND ((website IS NOT NULL AND website_checked_at IS NULL)
+          OR ($1 AND website IS NULL AND (contacts_searched_at IS NULL OR contacts_searched_at < now() - interval '30 days')))
+      ORDER BY contacts_searched_at NULLS FIRST, created_at DESC LIMIT $2`, [canSearch, cfg.batch_size * 3]);
+    let queued = 0;
+    for (const r of rows) if (await enqueue(db, 'enrich_company', { companyId: r.id }, { dedupeKey: `enrich:${r.id}`, priority: 55 })) queued++;
+    return { queued };
   },
 
   /** Verificación en registro abierto (GLEIF). Añade evidencias; "verificada" la decide un administrador. */
@@ -192,6 +261,7 @@ export async function scheduleRecurring(db: Db, now = new Date()) {
     await enqueueOncePerPeriod(db, 'send_emails', now.toISOString().slice(0, 15)),     // cada 10 min
     await enqueueOncePerPeriod(db, 'process_supplier_requests', hour),
     await enqueueOncePerPeriod(db, 'check_links', hour),
+    await enqueueOncePerPeriod(db, 'fill_contacts', hour),
     await enqueueOncePerPeriod(db, 'flag_stale', day),
     await enqueueOncePerPeriod(db, 'detect_duplicates', day),
     await enqueueOncePerPeriod(db, 'cleanup', day),
