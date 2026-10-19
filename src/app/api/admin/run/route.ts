@@ -12,7 +12,10 @@ export const maxDuration = 60;
 export const POST = api(async () => {
   const u = await requireAdmin();
   const db = getDb();
-  await enqueue(db, 'import_wikidata', {}, { dedupeKey: 'continuo:import_wikidata', priority: 80 });
+  // Una sola tanda de importación a la vez (evita repetir el mismo país y saturar la fuente)
+  if (!(await one(db, "SELECT 1 FROM jobs WHERE type = 'import_wikidata' AND status IN ('queued', 'running')"))) {
+    await enqueue(db, 'import_wikidata', {}, { dedupeKey: 'continuo:import_wikidata', priority: 80 });
+  }
   const r = await runWorker(db, { timeBudgetMs: 45_000, schedule: true, workerId: `continuo:${u.id.slice(0, 8)}` });
   const stats = await one<{ total: number; contactable: number }>(db, `SELECT count(*)::int AS total,
     count(*) FILTER (WHERE email IS NOT NULL OR phone IS NOT NULL)::int AS contactable FROM companies WHERE deleted_at IS NULL`);
