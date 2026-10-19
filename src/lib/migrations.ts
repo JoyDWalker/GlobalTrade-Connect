@@ -26,14 +26,15 @@ export function loadMigrations(dir = MIGRATIONS_DIR): Migration[] {
   });
 }
 
-export interface MigrateOptions { dir?: string; allowDestructive?: boolean; dryRun?: boolean; log?: (m: string) => void }
+export interface MigrateOptions { dir?: string; allowDestructive?: boolean; dryRun?: boolean; log?: (m: string) => void; /** false solo si la conexión pasa por un pooler en modo transacción */ lock?: boolean }
 
 export async function migrate(db: Db, opts: MigrateOptions = {}) {
   const say = opts.log ?? (() => {});
   const migrations = loadMigrations(opts.dir);
   await db.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
     version text PRIMARY KEY, file text NOT NULL, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`);
-  await db.query('SELECT pg_advisory_lock($1)', [LOCK_ID]);
+  const lock = opts.lock !== false;
+  if (lock) await db.query('SELECT pg_advisory_lock($1)', [LOCK_ID]);
   try {
     const applied = new Map((await db.query<{ version: string; checksum: string; file: string }>(
       'SELECT version, checksum, file FROM schema_migrations')).rows.map((r) => [r.version, r]));
@@ -61,7 +62,7 @@ export async function migrate(db: Db, opts: MigrateOptions = {}) {
     }
     return pending.map((m) => m.file);
   } finally {
-    await db.query('SELECT pg_advisory_unlock($1)', [LOCK_ID]);
+    if (lock) await db.query('SELECT pg_advisory_unlock($1)', [LOCK_ID]);
   }
 }
 

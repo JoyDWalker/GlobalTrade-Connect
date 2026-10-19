@@ -30,13 +30,13 @@ function sslConfig(): pg.PoolConfig['ssl'] {
   return { rejectUnauthorized: false };
 }
 
-export function createPgDb(connectionString = env().DATABASE_URL): Db {
+export function createPgDb(connectionString = env().DATABASE_URL, opts: { max?: number } = {}): Db {
   const url = new URL(connectionString);
-  url.searchParams.delete('sslmode');          // el TLS se configura de forma explícita abajo
+  url.search = '';   // sslmode, supa, pgbouncer…: el TLS se configura de forma explícita abajo
   const pool = new pg.Pool({
     connectionString: url.toString(),
     ssl: sslConfig(),
-    max: env().DB_POOL_MAX,
+    max: opts.max ?? env().DB_POOL_MAX,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 8_000,
     statement_timeout: 15_000,

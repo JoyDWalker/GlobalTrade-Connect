@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { getDb, one } from '@/lib/db';
 import { migrationStatus } from '@/lib/migrations';
 import { log } from '@/lib/logger';
-import { configProblems } from '@/lib/env';
+import { authConfigured, configProblems, configWarnings } from '@/lib/env';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +21,7 @@ export async function GET() {
     body.config = { ok: false, problems };
     return NextResponse.json(body, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
-  body.config = { ok: true, auth: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY), storage: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) };
+  body.config = { ok: true, auth: authConfigured(), warnings: configWarnings() };
   try {
     const db = getDb();
     const r = await one<{ now: string }>(db, 'SELECT now()::text AS now');

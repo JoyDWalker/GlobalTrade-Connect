@@ -79,10 +79,10 @@ describe('configuración', () => {
       resetEnvCache();
       expect(() => env()).toThrow(/cifrada/);
       process.env.DATABASE_SSL = 'require';
-      delete process.env.CRON_SECRET;
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
       resetEnvCache();
-      expect(() => env()).toThrow(/CRON_SECRET/);
-      process.env.CRON_SECRET = 's';
+      expect(() => env()).toThrow(/NEXT_PUBLIC_SUPABASE_URL/);
+      process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://a.supabase.co';
       process.env.APP_SECRET = 'corto';
       resetEnvCache();
       expect(() => env()).toThrow(/APP_SECRET/);
