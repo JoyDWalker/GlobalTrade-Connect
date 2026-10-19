@@ -60,18 +60,20 @@ export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promis
       await q.query(`INSERT INTO company_sources (company_id, source_id, external_id, source_url, title, snippet, raw) VALUES ($1,$2,$3,$4,$5,$6,$7)
         ON CONFLICT (source_id, external_id) DO UPDATE SET last_seen_at = now(), snippet = EXCLUDED.snippet, title = EXCLUDED.title`,
       [id, sourceId, h.externalId, srcUrl, h.name, h.snippet, JSON.stringify(h.raw ?? null)]);
+      // Completa contactos que falten con los de la nueva fuente
+      if (h.email || h.phone) await q.query('UPDATE companies SET email = coalesce(email, $2), phone = coalesce(phone, $3) WHERE id = $1', [id, h.email ?? null, h.phone ?? null]);
       return { id, created: false };
     }
     const slugBase = normalize(h.name).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 70) || 'empresa';
     let slug = slugBase;
     for (let i = 2; await one(q, 'SELECT 1 FROM companies WHERE slug = $1', [slug]); i++) slug = `${slugBase}-${i}`;
     const country = h.countryCode && (await one(q, 'SELECT 1 FROM countries WHERE iso_code = $1', [h.countryCode])) ? h.countryCode : null;
-    const row = await one<{ id: string }>(q, `INSERT INTO companies (slug, name, legal_name, lei, city, address, website, domain, country_code, record_status, verification_level, origin, description)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'detected','none','external',NULL) RETURNING id`, [slug, h.name, h.legalName ?? null, h.lei ?? null, h.city ?? null, h.address ?? null, h.url, h.domain, country]);
+    const row = await one<{ id: string }>(q, `INSERT INTO companies (slug, name, legal_name, lei, city, address, website, domain, country_code, email, phone, record_status, verification_level, origin, description)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'detected','none','external',NULL) RETURNING id`, [slug, h.name, h.legalName ?? null, h.lei ?? null, h.city ?? null, h.address ?? null, h.url, h.domain, country, h.email ?? null, h.phone ?? null]);
     const id = row!.id;
     await q.query(`INSERT INTO company_sources (company_id, source_id, external_id, source_url, title, snippet, raw) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [id, sourceId, h.externalId, srcUrl, h.name, h.snippet, JSON.stringify(h.raw ?? null)]);
-    for (const [field, value] of [['name', h.name], ['legal_name', h.legalName], ['lei', h.lei], ['city', h.city], ['address', h.address], ['website', h.url], ['country_code', country]] as const) {
+    for (const [field, value] of [['name', h.name], ['legal_name', h.legalName], ['lei', h.lei], ['city', h.city], ['address', h.address], ['website', h.url], ['email', h.email], ['phone', h.phone], ['country_code', country]] as const) {
       if (value) await q.query("INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,'detected')", [id, field, value, sourceId, srcUrl]);
     }
     await refreshSearchText(q, id);
@@ -79,7 +81,8 @@ export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promis
     if (h.snippet) await q.query("UPDATE companies SET search_text = search_text || ' ' || $2 WHERE id = $1", [id, normalize(h.snippet)]);
     await q.query(`INSERT INTO review_tasks (company_id, kind, priority, details, dedupe_key) VALUES ($1, 'new_detected', 20, $2, $3)
       ON CONFLICT (dedupe_key) WHERE status = 'open' AND dedupe_key IS NOT NULL DO NOTHING`, [id, JSON.stringify({ source: h.sourceKey, url: h.url }), `new_detected:${id}`]);
-    await enqueue(q, 'enrich_company', { companyId: id }, { dedupeKey: `enrich:${id}`, priority: 40 });
+    // Visitar su web para obtener email y teléfono corporativos publicados
+    if (h.url) await enqueue(q, 'enrich_company', { companyId: id }, { dedupeKey: `enrich:${id}`, priority: 60 });
     return { id, created: true };
   });
 }
@@ -151,10 +154,13 @@ export async function runExternalSearch(db: Db, req: ExternalRequest, adapters: 
     }
 
     // Tiempo máximo global: lo que no termine a tiempo se descarta (los registros quedan para la próxima vez)
-    const deadline = new Promise<'deadline'>((r) => setTimeout(() => r('deadline'), cfg.timeout_ms + 3000));
-    const settled = await Promise.race([Promise.allSettled(tasks), deadline]);
-    const done = settled === 'deadline' ? [] : settled;
-    if (settled === 'deadline') log.warn('Búsqueda externa: tiempo global agotado', { query: req.query });
+    // Se conservan las fuentes que terminan a tiempo aunque otra se retrase
+    const finished: PromiseSettledResult<Awaited<(typeof tasks)[number]>>[] = [];
+    const tracked = tasks.map((t) => t.then((v) => { finished.push({ status: 'fulfilled', value: v }); }, (e) => { finished.push({ status: 'rejected', reason: e }); }));
+    const deadline = new Promise<'deadline'>((r) => setTimeout(() => r('deadline'), cfg.timeout_ms * 2 + 2000));
+    const settled = await Promise.race([Promise.all(tracked).then(() => 'all' as const), deadline]);
+    const done = [...finished];
+    if (settled === 'deadline') log.warn('Búsqueda externa: tiempo global agotado', { query: req.query, finished: done.length, total: tasks.length });
 
     const ids: string[] = [];
     let newCompanies = 0;

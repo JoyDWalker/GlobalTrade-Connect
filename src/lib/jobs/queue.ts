@@ -20,10 +20,11 @@ export async function enqueueOncePerPeriod(q: Queryable, type: string, periodKey
   return r?.id ?? null;
 }
 
-export async function claimNext(q: Queryable, workerId: string): Promise<Job | null> {
+export async function claimNext(q: Queryable, workerId: string, types?: string[]): Promise<Job | null> {
   const r = await one<Job>(q, `UPDATE jobs SET status = 'running', locked_at = now(), locked_by = $1, attempts = attempts + 1, started_at = now()
-    WHERE id = (SELECT id FROM jobs WHERE status = 'queued' AND run_at <= now() ORDER BY priority DESC, run_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
-    RETURNING id, type, payload, status, attempts, max_attempts, dedupe_key, created_at`, [workerId]);
+    WHERE id = (SELECT id FROM jobs WHERE status = 'queued' AND run_at <= now() AND ($2::text[] IS NULL OR type = ANY($2::text[]))
+      ORDER BY priority DESC, run_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
+    RETURNING id, type, payload, status, attempts, max_attempts, dedupe_key, created_at`, [workerId, types ?? null]);
   if (r && typeof r.payload === 'string') r.payload = JSON.parse(r.payload);
   return r;
 }
