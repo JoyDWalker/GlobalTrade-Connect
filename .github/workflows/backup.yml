@@ -31,6 +31,13 @@ jobs:
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
           set -euo pipefail
+          # Una base vacía o de otro proyecto daría una copia "correcta" pero inútil: se comprueba antes
+          companies=$(/usr/lib/postgresql/17/bin/psql "$DATABASE_URL" -tAc "SELECT count(*) FROM public.companies" 2>/dev/null || true)
+          if ! [[ "$companies" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::La base de datos no tiene la tabla companies o está vacía: revisa que PRODUCTION_DATABASE_URL apunte al proyecto de producción"
+            exit 1
+          fi
+          echo "Empresas en la base de datos: $companies"
           file="globaltrade-$(date -u +%Y%m%dT%H%M%SZ).dump"
           /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges --schema=public --file="$file"
           gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" --symmetric --cipher-algo AES256 -o "$file.gpg" "$file"
