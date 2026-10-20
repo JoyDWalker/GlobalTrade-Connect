@@ -124,6 +124,10 @@ export const HANDLERS: Record<string, Handler> = {
         [src, c.website, se.kind === 'timeout' ? 'timeout' : se.kind === 'blocked' ? 'blocked' : 'error', se.httpStatus ?? null, Date.now() - started, se.message, job.id]);
       await db.query('UPDATE companies SET website_status = $2, website_checked_at = now() WHERE id = $1', [c.id, se.kind === 'blocked' ? 'blocked' : 'broken']);
       if (se.kind === 'blocked') return { skipped: se.message };     // robots.txt o dirección no pública: no se reintenta
+      // Una web caída es un dato de la empresa (website_status), no un fallo de la tarea: los errores definitivos
+      // (4xx, dominio que no resuelve) no se reintentan y los pasajeros solo hasta el último intento
+      const permanent = se.kind === 'invalid' || (se.kind === 'http' && (se.httpStatus ?? 500) < 500) || se.message === 'El dominio no resuelve';
+      if (e instanceof SourceError && (permanent || job.attempts >= job.max_attempts)) return { unreachable: se.message };
       throw e;
     }
   },

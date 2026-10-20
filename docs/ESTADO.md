@@ -1,13 +1,13 @@
-# Estado del proyecto (19 de octubre de 2026)
+# Estado del proyecto (20 de octubre de 2026)
 
-> **Producción**: https://global-trade-connect-three.vercel.app (Vercel + Supabase). /api/health: base de datos conectada, 2 migraciones aplicadas. Fuentes externas activas: GLEIF y Wikidata (gratuitas). Brave Search: pendiente de clave.
+> **Producción**: https://global-trade-connect-three.vercel.app (Vercel + Supabase). /api/health: base de datos conectada, 8 migraciones aplicadas. Fuentes externas activas: GLEIF, Wikidata/QLever y OpenStreetMap (gratuitas). Brave Search: pendiente de clave.
 
 Se distingue entre **implementado y probado en local**, **configurado pero no verificado contra el servicio real** y **pendiente**.
 
 ## Implementado y probado (en local y en pruebas automatizadas)
 
 - Reescritura en Next.js 16 + TypeScript + PostgreSQL conservando el modelo, diseño, flujos y datos de demostración de la versión 1 (`legacy-v1` en Git).
-- Esquema PostgreSQL con 2 migraciones versionadas (checksum, bloqueo, guarda contra migraciones destructivas), RLS en todas las tablas, índices de búsqueda, deduplicación por dominio, NIF y LEI, borrado lógico.
+- Esquema PostgreSQL con 8 migraciones versionadas (checksum, bloqueo, guarda contra migraciones destructivas), RLS en todas las tablas, índices de búsqueda, deduplicación por dominio, NIF y LEI, borrado lógico.
 - Búsqueda en lenguaje natural con filtros (sector, país, región, ciudad, tipo, certificación, idioma, cliente, verificación, fuente, capacidad, pedido mínimo), orden, paginación, exportación CSV/Excel de selección o resultados.
 - Búsqueda externa en segundo plano con caché, cuotas, presupuesto, límites por usuario/IP, reintentos, timeouts y tolerancia a fallos (probada con fuentes simuladas).
 - Fichas con procedencia por fuente y por dato, fechas de recopilación y comprobación, estados detectada/pendiente/contrastada/verificada.
@@ -17,34 +17,31 @@ Se distingue entre **implementado y probado en local**, **configurado pero no ve
 - Worker con cola persistente: enriquecimiento web (robots.txt, anti-SSRF), verificación GLEIF, enlaces, datos antiguos, duplicados, candidatos para solicitudes, emails, limpieza; recuperación de tareas interrumpidas.
 - Seguridad: autorización en servidor, CSRF por Origin, CSP con nonce, cabeceras, anti-spam, logs redactados, auditoría, validación de entorno.
 - Procedimiento seguro de primer administrador (`npm run admin:grant`).
-- **39 pruebas automatizadas superadas**, `tsc` sin errores, `next build` correcto, versión de producción probada en local (hidratación con CSP), interfaz revisada en escritorio y móvil.
+- **67 pruebas automatizadas superadas**, `tsc` sin errores, `next build` correcto, versión de producción probada en local (hidratación con CSP), interfaz revisada en escritorio y móvil.
+
+## En producción
+
+- **URL**: https://global-trade-connect-three.vercel.app (Vercel + Supabase), despliegue automático desde `main`.
+- `/api/health`: base de datos conectada y 8 migraciones aplicadas.
+- Fuentes gratuitas activas: GLEIF, Wikidata/QLever (importación de empresas), OpenStreetMap y webs oficiales.
+- Supabase Auth en uso; el propietario recibe el rol de administrador al iniciar sesión.
 
 ## Configurado pero no verificado contra servicios reales
 
 | Elemento | Estado |
 |---|---|
-| Supabase Auth (registro, login, recuperación, callback) | Código listo; sin proyecto Supabase todavía no se ha probado de extremo a extremo |
-| Supabase Storage (logos) | Código listo; requiere bucket `logos` y *service role key* |
-| Serper.dev / Brave Search API / Google CSE | Adaptadores listos y probados con respuestas simuladas; sin claves reales |
-| GLEIF y descarga de webs reales | Implementado; probado con datos simulados (las pruebas no usan red) |
-| Resend | Implementado; sin clave, los emails se registran (modo `log`) |
-| Vercel (build, cron, funciones) | `vercel.json` y migración en build preparados; no desplegado |
-| GitHub Actions (CI, cron 15 min, copias, verificación post-despliegue) | Workflows escritos; no ejecutados (no hay repositorio remoto todavía) |
+| Serper.dev / Brave Search API / Google CSE | Adaptadores probados con respuestas simuladas; sin claves reales |
+| Claude (expansión de búsquedas con IA) | Opcional; sin `ANTHROPIC_API_KEY` se usa el catálogo de sectores |
+| Resend | Sin clave, los emails se registran (modo `log`) |
+| Supabase Storage (logos) | Requiere bucket `logos` y *service role key* |
+| GitHub Actions (cron cada 15 min, copias de seguridad) | Workflows escritos; desactivados hasta definir sus secretos |
 
-## Estado de producción
+## Pendiente
 
-- **URL pública**: no hay todavía. Falta crear las cuentas/proyectos de Supabase y Vercel y el repositorio de GitHub.
-- **Base de datos de producción, migraciones, despliegue automático, tareas programadas, copias y monitorización**: preparados, **no activos**.
-- **Dominio propio**: no registrado ni conectado (procedimiento en docs/DESPLIEGUE.md §7).
-
-## Pendiente para publicar
-
-1. Repositorio en GitHub (privado recomendado) y `git push`.
-2. Proyectos Supabase de producción y staging; bucket `logos`; URLs de Auth.
-3. Proyecto en Vercel con las variables de entorno de Production y Preview.
-4. Secretos y variables de GitHub Actions.
-5. Registro del primer administrador y `npm run admin:grant`.
-6. Opcional: Resend con dominio verificado, Serper.dev o Brave Search API, clave de Anthropic (expansión con IA), webhook de alertas, dominio propio.
+1. **`CRON_SECRET`** en Vercel y en GitHub (más `PRODUCTION_URL` y `SCHEDULED_TASKS_ENABLED=true`): sin ella el worker programado está desactivado y la importación solo avanza desde el panel o con el cron diario de Vercel.
+2. **`APP_SECRET`** propia (ahora se deriva automáticamente).
+3. Copias de seguridad diarias (`PRODUCTION_DATABASE_URL`, `BACKUP_PASSPHRASE`, `BACKUPS_ENABLED=true`).
+4. Opcional: Resend con dominio verificado, Serper.dev o Brave Search API, clave de Anthropic, webhook de alertas, dominio propio.
 
 ## Costes recurrentes previsibles
 
