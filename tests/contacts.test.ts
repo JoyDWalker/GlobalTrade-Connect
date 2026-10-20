@@ -127,3 +127,13 @@ describe('contactos de empresas sin web', () => {
     expect(web).toMatchObject({ sig_registry: false, sig_website: true, sig_maps: false });
   });
 });
+
+describe('webs que no responden', () => {
+  it('una web que no existe queda marcada como caída sin que la tarea falle ni se reintente', async () => {
+    const db = await freshDb();
+    const id = await gleifCompany(db, ", 'https://empresa-cerrada.invalid', 'empresa-cerrada.invalid'");
+    const r: any = await HANDLERS.enrich_company({ db, job: { id: 1, attempts: 1, max_attempts: 3, payload: { companyId: id } } as any, deadline: Date.now() + 10000 });
+    expect(r).toEqual({ unreachable: 'El dominio no resuelve' });
+    expect((await db.query('SELECT website_status FROM companies WHERE id = $1', [id])).rows[0].website_status).toBe('broken');
+  });
+});
