@@ -32,8 +32,9 @@ jobs:
         run: |
           set -euo pipefail
           # Una base vacía o de otro proyecto daría una copia "correcta" pero inútil: se comprueba antes
-          companies=$(/usr/lib/postgresql/17/bin/psql "$DATABASE_URL" -tAc "SELECT count(*) FROM public.companies" 2>/dev/null || true)
+          companies=$(/usr/lib/postgresql/17/bin/psql "$DATABASE_URL" -tAc "SELECT count(*) FROM public.companies" 2>&1 || true)
           if ! [[ "$companies" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Respuesta de la base de datos: $companies"
             echo "::error::La base de datos no tiene la tabla companies o está vacía: revisa que PRODUCTION_DATABASE_URL apunte al proyecto de producción"
             exit 1
           fi
