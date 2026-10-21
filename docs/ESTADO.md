@@ -34,14 +34,12 @@ Se distingue entre **implementado y probado en local**, **configurado pero no ve
 | Claude (expansión de búsquedas con IA) | Opcional; sin `ANTHROPIC_API_KEY` se usa el catálogo de sectores |
 | Resend | Sin clave, los emails se registran (modo `log`) |
 | Supabase Storage (logos) | Requiere bucket `logos` y *service role key* |
-| GitHub Actions (cron cada 15 min, copias de seguridad) | Workflows escritos; desactivados hasta definir sus secretos |
+| GitHub Actions | Activos: worker programado (GitHub lo ejecuta cada pocas horas aunque esté pedido cada 15 min) y copia de seguridad diaria cifrada (probada: 20.533 empresas, 7,3 MB) |
 
 ## Pendiente
 
-1. **`CRON_SECRET`** en Vercel y en GitHub (más `PRODUCTION_URL` y `SCHEDULED_TASKS_ENABLED=true`): sin ella el worker programado está desactivado y la importación solo avanza desde el panel o con el cron diario de Vercel.
-2. **`APP_SECRET`** propia (ahora se deriva automáticamente).
-3. Copias de seguridad diarias (`PRODUCTION_DATABASE_URL`, `BACKUP_PASSPHRASE`, `BACKUPS_ENABLED=true`).
-4. Opcional: Resend con dominio verificado, Serper.dev o Brave Search API, clave de Anthropic, webhook de alertas, dominio propio.
+1. **`APP_SECRET`** propia (ahora se deriva automáticamente).
+2. Opcional: Resend con dominio verificado, Serper.dev o Brave Search API, clave de Anthropic, webhook de alertas, dominio propio.
 
 ## Costes recurrentes previsibles
 
