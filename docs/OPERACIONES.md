@@ -23,7 +23,7 @@ Para alertas inmediatas define `ALERT_WEBHOOK_URL` (Slack, Discord o Teams). Se 
 ## Copias de seguridad
 
 1. **Supabase**: el plan Pro incluye copias diarias (con retención según plan) y opcionalmente PITR. El plan gratuito no ofrece copias descargables: no lo uses en producción sin la copia propia.
-2. **Copia propia** (`.github/workflows/backup.yml`): `pg_dump` diario del esquema `public`, cifrado con GPG AES-256 y guardado 30 días como artefacto privado del repositorio. Actívalo con la variable `BACKUPS_ENABLED=true` y los secretos `PRODUCTION_DATABASE_URL` y `BACKUP_PASSPHRASE`.
+2. **Copia propia** (`.github/workflows/backup.yml`): `pg_dump` diario del esquema `public`, cifrado con GPG AES-256 y guardado 30 días como artefacto privado del repositorio. Actívalo con la variable `BACKUPS_ENABLED=true` y los secretos `PRODUCTION_DATABASE_URL` (copia el valor de `GTC_POSTGRES_URL_NON_POOLING` de Vercel) y `BACKUP_PASSPHRASE`. Si la base está vacía o no se puede leer, la copia falla y GitHub avisa por email.
 3. Prueba la restauración al menos una vez al trimestre en un proyecto de staging.
 
 ### Restaurar una copia propia

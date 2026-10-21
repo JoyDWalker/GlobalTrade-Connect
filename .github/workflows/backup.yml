@@ -1,6 +1,7 @@
 # Copia de seguridad diaria de la base de datos de producción, cifrada con GPG (AES-256)
 # y guardada como artefacto privado del repositorio durante 30 días.
-# Secretos: PRODUCTION_DATABASE_URL (conexión directa o "session pooler", puerto 5432; NO el transaction pooler)
+# Secretos: PRODUCTION_DATABASE_URL = valor de GTC_POSTGRES_URL_NON_POOLING en Vercel (session pooler, puerto 5432;
+#             NO el transaction pooler). Ojo: la base de producción está en la organización de Supabase creada por Vercel.
 #           BACKUP_PASSPHRASE (contraseña larga, guardada también fuera de GitHub)
 # Restauración: ver docs/OPERACIONES.md
 name: Copia de seguridad
@@ -31,6 +32,14 @@ jobs:
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
           set -euo pipefail
+          # Una base vacía o de otro proyecto daría una copia "correcta" pero inútil: se comprueba antes
+          companies=$(/usr/lib/postgresql/17/bin/psql "$DATABASE_URL" -tAc "SELECT count(*) FROM public.companies" 2>&1 || true)
+          if ! [[ "$companies" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Respuesta de la base de datos: $companies"
+            echo "::error::La base de datos no tiene la tabla companies o está vacía: revisa que PRODUCTION_DATABASE_URL apunte al proyecto de producción"
+            exit 1
+          fi
+          echo "Empresas en la base de datos: $companies"
           file="globaltrade-$(date -u +%Y%m%dT%H%M%SZ).dump"
           /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges --schema=public --file="$file"
           gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" --symmetric --cipher-algo AES256 -o "$file.gpg" "$file"

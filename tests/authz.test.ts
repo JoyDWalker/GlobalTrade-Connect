@@ -1,5 +1,5 @@
 // Autenticación y autorización: se llaman las rutas reales de la API con distintos usuarios.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { freshDb } from './helpers';
 import { setTestUser, type SessionUser } from '@/lib/auth/session';
@@ -92,10 +92,13 @@ describe('autorización en el servidor', () => {
     process.env.CRON_SECRET = 'cron-secret-for-tests';
     const { resetEnvCache } = await import('@/lib/env');
     resetEnvCache();
+    // Solo se comprueba el secreto: sin red, para que el worker no dependa de fuentes externas (QLever, webs)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('sin red en las pruebas'); }));
     expect((await cron.GET(req('GET', '/api/cron/worker'))).status).toBe(401);
     expect((await cron.GET(req('GET', '/api/cron/worker', undefined, { authorization: 'Bearer otro' }))).status).toBe(401);
     expect((await cron.GET(req('GET', '/api/cron/worker', undefined, { authorization: 'Bearer cron-secret-for-tests' }))).status).toBe(200);
-  });
+    vi.unstubAllGlobals();
+  }, 60_000);                                                       // ejecuta una ronda completa del worker
 });
 
 describe('visibilidad pública', () => {
