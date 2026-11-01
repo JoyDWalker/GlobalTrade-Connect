@@ -12,7 +12,7 @@ export async function register() {
     return;
   }
   const e = env();
-  log.info('Servidor iniciado', { appEnv: e.APP_ENV, auth: Boolean(e.NEXT_PUBLIC_SUPABASE_URL), mailer: e.EMAIL_PROVIDER, searchApis: { brave: Boolean(e.BRAVE_SEARCH_API_KEY), google: Boolean(e.GOOGLE_CSE_API_KEY && e.GOOGLE_CSE_ENGINE_ID) } });
+  log.info('Servidor iniciado', { appEnv: e.APP_ENV, auth: Boolean(e.NEXT_PUBLIC_SUPABASE_URL), mailer: e.EMAIL_PROVIDER, searchApis: { brave: Boolean(e.BRAVE_SEARCH_API_KEY), firecrawl: Boolean(e.FIRECRAWL_API_KEY), google: Boolean(e.GOOGLE_CSE_API_KEY && e.GOOGLE_CSE_ENGINE_ID) } });
 }
 
 export async function onRequestError(error: unknown, request: { path: string; method: string }, context: { routerKind: string; routePath: string; routeType: string }) {

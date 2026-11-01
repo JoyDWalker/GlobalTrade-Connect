@@ -28,7 +28,7 @@ export interface ExternalRequest { query: string; country?: string | null; actor
 const cacheKey = (source: string, query: string, country?: string | null) =>
   crypto.createHash('sha256').update(`${source}|${normalize(query)}|${country ?? ''}`).digest('hex');
 
-async function spentTodayUsd(q: Queryable) {
+export async function spentTodayUsd(q: Queryable) {
   const r = await one<{ usd: string }>(q, "SELECT coalesce(sum(cost_usd), 0) AS usd FROM external_requests WHERE created_at >= date_trunc('day', now())");
   return Number(r?.usd ?? 0);
 }
@@ -83,6 +83,8 @@ export async function ingestHit(db: Db, h: CompanyHit, sourceId: number): Promis
       ON CONFLICT (dedupe_key) WHERE status = 'open' AND dedupe_key IS NOT NULL DO NOTHING`, [id, JSON.stringify({ source: h.sourceKey, url: h.url }), `new_detected:${id}`]);
     // Visitar su web para obtener email y teléfono corporativos publicados
     if (h.url) await enqueue(q, 'enrich_company', { companyId: id }, { dedupeKey: `enrich:${id}`, priority: 60 });
+    // Sin web (p. ej. registro GLEIF): buscar primero su web oficial
+    else await enqueue(q, 'discover_website', { companyId: id }, { dedupeKey: `discover:${id}`, priority: 55 });
     return { id, created: true };
   });
 }

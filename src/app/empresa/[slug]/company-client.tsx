@@ -33,8 +33,9 @@ export function CompanyActions({ company, publicEmail, detected }: { company: Co
   );
 }
 
-export function ContactCard({ company, contacts, email, phone, website, social, hasPrivate, detected }: {
+export function ContactCard({ company, contacts, email, phone, website, social, hasPrivate, detected, searching = false, webSearchQuery = null }: {
   company: Co; contacts: any[]; email: string | null; phone: string | null; website: string | null; social: [string, string][]; hasPrivate: boolean; detected: boolean;
+  searching?: boolean; webSearchQuery?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const toast = useToast();
@@ -53,6 +54,13 @@ export function ContactCard({ company, contacts, email, phone, website, social, 
         </div>))}
       {hasPrivate && <div className="notice small" style={{ margin: '8px 0' }}>Algunos contactos personales no se publican. Usa el formulario.</div>}
       {website && <div className="contact-line"><Icon name="globe" /><a className="grow" href={website} target="_blank" rel="noopener noreferrer nofollow">{website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</a></div>}
+      {webSearchQuery && (
+        <div className="notice small" style={{ margin: '8px 0' }}>
+          {searching
+            ? <>Estamos buscando la web oficial, el email y el teléfono de esta empresa en fuentes públicas. Vuelve a cargar la página en unos segundos.</>
+            : <>No hemos encontrado todavía web, email ni teléfono públicos de esta empresa.</>}
+          {' '}<a href={`https://duckduckgo.com/?q=${encodeURIComponent(webSearchQuery)}`} target="_blank" rel="noopener noreferrer nofollow">Buscarla en la web</a>
+        </div>)}
       {social.length > 0 && <div className="row" style={{ gap: 6, marginTop: 10 }}>{social.map(([k, v]) => <a key={k} className="btn btn-outline btn-sm" href={v} target="_blank" rel="noopener noreferrer nofollow">{LABEL[k] ?? k}</a>)}</div>}
       {detected && <p className="provenance" style={{ marginTop: 8 }}>Datos públicos detectados en fuentes externas. Las solicitudes a empresas no verificadas las revisa nuestro equipo antes de reenviarlas.</p>}
       <button className="btn btn-primary" style={{ width: '100%', marginTop: 14 }} onClick={() => setOpen(true)}>Enviar mensaje</button>

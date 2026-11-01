@@ -114,6 +114,9 @@ export const sources = [
   { key: 'brave', name: 'Brave Search API', kind: 'search_api', reliability: 40, cost: 5, quota: 30,
     base_url: 'https://api.search.brave.com/res/v1/web/search', terms_url: 'https://api-dashboard.search.brave.com/',
     notes: 'De pago por uso (aprox. 5 USD/1.000 consultas, con un crédito mensual). Verifica precio y condiciones actuales en su panel.' },
+  { key: 'firecrawl', name: 'Firecrawl', kind: 'search_api', reliability: 45, cost: 2.5, quota: 30,
+    base_url: 'https://api.firecrawl.dev/v2', terms_url: 'https://www.firecrawl.dev/pricing',
+    notes: 'Búsqueda web y lectura de webs que necesitan JavaScript. El coste es por 1.000 CRÉDITOS (búsqueda: 2 créditos por 10 resultados; lectura: 1 por página): 1.000 créditos/mes gratis y después aprox. 2,5 USD/1.000 (plan Standard). La cuota diaria es de peticiones (30/día ≈ el plan gratuito). Verifica precio en su panel.' },
   { key: 'gleif', name: 'GLEIF – Registro mundial LEI', kind: 'registry', reliability: 90, cost: 0, quota: null,
     base_url: 'https://api.gleif.org/api/v1', terms_url: 'https://www.gleif.org/en/meta/terms-of-use', licence: 'CC0 1.0',
     notes: 'Datos abiertos (CC0) de entidades legales con código LEI. Se usa para buscar por nombre legal y para verificar. Cobertura limitada a entidades con LEI.' },
@@ -131,5 +134,7 @@ export const defaultSettings: [string, unknown, string][] = [
     'Límites de consumo por usuario/IP y presupuesto diario de APIs'],
   ['worker', { batch_size: 10, time_budget_ms: 45000, stale_after_days: 90, link_check_after_days: 30, stuck_after_minutes: 15, concurrency: 6 },
     'Parámetros del worker'],
+  ['website_discovery', { enabled: true, use_web_search: true, batch_size: 40, max_seconds_per_company: 25 },
+    'Búsqueda de la web oficial (y de su email y teléfono) de las empresas detectadas sin web'],
   ['discovery_queries', [] as string[], 'Consultas que el worker usa para descubrir empresas nuevas (p. ej. "exportadores de café Colombia")'],
 ];

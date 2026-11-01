@@ -25,6 +25,16 @@ const config: NextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },
+  // PostHog (región UE) servido desde el propio dominio: lo permite la CSP y no lo bloquean los bloqueadores
+  async rewrites() {
+    return [
+      { source: '/ingest/static/:path*', destination: 'https://eu-assets.i.posthog.com/static/:path*' },
+      { source: '/ingest/array/:path*', destination: 'https://eu-assets.i.posthog.com/array/:path*' },
+      { source: '/ingest/:path*', destination: 'https://eu.i.posthog.com/:path*' },
+    ];
+  },
+  // La API de PostHog usa barras finales (/e/); sin esto Next.js las redirige y se pierden los eventos
+  skipTrailingSlashRedirect: true,
 };
 
 export default config;

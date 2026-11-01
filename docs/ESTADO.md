@@ -4,6 +4,15 @@
 
 Se distingue entre **implementado y probado en local**, **configurado pero no verificado contra el servicio real** y **pendiente**.
 
+## Webs, emails y teléfonos de empresas detectadas (19/10/2026)
+
+- Problema observado en producción: las empresas que llegan desde GLEIF (la mayoría) no traen web, así que no había ninguna web que visitar para sacar email y teléfono. Las de Wikidata sí (p. ej. Ybarra: web y teléfono).
+- Nueva tarea `discover_website`: para cada empresa sin web busca su web oficial en este orden: Wikidata por código LEI (gratis) → dominios probables construidos con el nombre (`nombre.es`, `nombre.com`…, gratis) → Brave Search si hay `BRAVE_SEARCH_API_KEY` (≈1 consulta por empresa, respeta el presupuesto diario). Una web solo se acepta si su contenido menciona a la empresa (y se descartan dominios aparcados); después se leen portada y página de contacto para guardar email y teléfono con su procedencia.
+- Se lanza al guardar resultados externos, tras cada búsqueda (también para empresas ya guardadas sin web), al abrir una ficha sin contacto y cada hora en lote (`discover_missing`, requiere el cron activo). Cada empresa se intenta una vez (`website_discovered_at`, migración 0004).
+- Las fichas sin contacto muestran el aviso «Estamos buscando…» y un enlace para buscarla en la web.
+- Ajustes: Admin → Ajustes → «Búsqueda de webs y contactos».
+- Cobertura esperable: sin Brave, solo empresas cuyo dominio coincide con su nombre o que están en Wikidata; con Brave la cobertura sube mucho.
+
 ## Implementado y probado (en local y en pruebas automatizadas)
 
 - Reescritura en Next.js 16 + TypeScript + PostgreSQL conservando el modelo, diseño, flujos y datos de demostración de la versión 1 (`legacy-v1` en Git).

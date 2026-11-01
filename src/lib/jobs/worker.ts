@@ -8,11 +8,13 @@ import { getSetting } from '../settings';
 import { canonicalName, normalize, normalizeDomain } from '../text';
 import { flushOutbox } from '../email';
 import { cleanupRateLimits } from '../rate-limit';
-import { checkLink, fetchSiteInfo, gleifLookup } from '../sources/adapters';
+import { brave, checkLink, fetchSiteInfo, firecrawl, firecrawlSiteInfo, gleifLookup, looksEmpty, type SearchAdapter, type SiteInfo } from '../sources/adapters';
+import { wikidataByLei } from '../sources/open-data';
+import { discoverWebsite, type DiscoverAttempt } from '../sources/discover';
 import { SourceError } from '../sources/http';
 import { refreshSearchText, searchCompanies } from '../services/companies';
 import { searchParamsSchema } from '../validation';
-import { runExternalSearch } from '../search/external';
+import { runExternalSearch, spentTodayUsd } from '../search/external';
 import { claimNext, completeJob, enqueue, enqueueOncePerPeriod, failJob, recoverStuck, type Job } from './queue';
 
 type Ctx = { db: Db; job: Job; deadline: number };
@@ -25,10 +27,72 @@ async function openTask(db: Db, companyId: string | null, kind: string, details:
     ON CONFLICT (dedupe_key) WHERE status = 'open' AND dedupe_key IS NOT NULL DO NOTHING`, [companyId, kind, priority, JSON.stringify(details), dedupeKey]);
 }
 
+const ENRICH_COLUMNS = 'id, name, website, description, email, phone, legal_name, address, city, region, postal_code, logo_url, origin, record_status';
+
+type PaidSource = { id: number; cost_per_1000_usd: string };
+
+/** Fuente de pago que se puede usar ahora: con clave, activa, con cuota diaria libre y dentro del presupuesto diario. */
+async function usablePaidSource(db: Db, adapter: SearchAdapter): Promise<PaidSource | null> {
+  if (!adapter.isConfigured()) return null;
+  const src = await one<PaidSource & { enabled: boolean; daily_quota: number | null }>(db, 'SELECT id, enabled, daily_quota, cost_per_1000_usd FROM sources WHERE key = $1', [adapter.key]);
+  if (!src?.enabled) return null;
+  if (src.daily_quota != null) {
+    const used = await one<{ n: string }>(db, `SELECT count(*) AS n FROM external_requests WHERE source_id = $1 AND created_at >= date_trunc('day', now())
+      AND status IN ('ok', 'error', 'timeout', 'rate_limited')`, [src.id]);
+    if (Number(used?.n ?? 0) >= src.daily_quota) return null;
+  }
+  const limits = await getSetting(db, 'limits');
+  return (await spentTodayUsd(db)) < limits.daily_budget_usd ? src : null;
+}
+
+/** Lee la web con Firecrawl cuando la descarga directa falla por bloqueo antibots o llega vacía (web con JavaScript). */
+async function renderWithFirecrawl(db: Db, jobId: number, website: string): Promise<SiteInfo | null> {
+  const src = await usablePaidSource(db, firecrawl);
+  if (!src) return null;
+  const t0 = Date.now();
+  try {
+    const r = await firecrawlSiteInfo(website);
+    await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, results, cost_usd, job_id) VALUES ($1,'enrich',$2,'ok',$3,$4,1,$5,$6)`,
+      [src.id, website.slice(0, 300), r.httpStatus, Date.now() - t0, Number(src.cost_per_1000_usd) / 1000 * r.credits, jobId]);
+    return r.info;
+  } catch (e) {
+    const se = e as SourceError;
+    await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, error, job_id) VALUES ($1,'enrich',$2,$3,$4,$5,$6,$7)`,
+      [src.id, website.slice(0, 300), se.kind === 'timeout' ? 'timeout' : se.kind === 'blocked' ? 'blocked' : 'error', se.httpStatus ?? null, Date.now() - t0, se.message?.slice(0, 500), jobId]);
+    return null;
+  }
+}
+
+/** Guarda en la ficha lo obtenido de su web (solo rellena huecos; el nombre se corrige en fichas detectadas). */
+async function applySiteInfo(db: Db, c: any, info: SiteInfo, src: number | null) {
+  const updates: Record<string, string> = {};
+  const fill = (field: string, value: string | null | undefined) => { if (value && !c[field]) updates[field] = value.slice(0, field === 'description' ? 1000 : 200); };
+  // Para empresas detectadas, el nombre de la web es más fiable que el título del buscador (no si viene de un registro oficial)
+  if (c.origin === 'external' && !c.legal_name && info.name && info.name.length >= 2) updates.name = info.name.slice(0, 150);
+  fill('legal_name', info.legalName); fill('description', info.description); fill('email', info.emails[0]); fill('phone', info.phones[0]);
+  fill('address', info.address?.street); fill('city', info.address?.city); fill('region', info.address?.region); fill('postal_code', info.address?.postalCode);
+  if (info.logo && !c.logo_url && /^https:\/\//.test(info.logo)) updates.logo_url = info.logo;
+  await db.tx(async (q) => {
+    const keys = Object.keys(updates);
+    await q.query(`UPDATE companies SET website_status = $2, website_checked_at = now(), last_checked_at = now()${keys.map((k, i) => `, ${k} = $${i + 3}`).join('')} WHERE id = $1`,
+      [c.id, info.redirected && normalizeDomain(info.finalUrl) !== normalizeDomain(c.website) ? 'redirect' : 'ok', ...keys.map((k) => updates[k])]);
+    for (const k of keys) {
+      await q.query(`INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [c.id, k, updates[k], src, info.finalUrl, c.origin === 'external' ? 'detected' : 'pending_review']);
+    }
+    if (keys.length) await q.query("INSERT INTO company_changes (company_id, change_source, changes) VALUES ($1, 'worker', $2)",
+      [c.id, JSON.stringify(Object.fromEntries(keys.map((k) => [k, { from: c[k] ?? null, to: updates[k] }])))]);
+    await q.query("INSERT INTO verification_events (company_id, kind, result, details, source_id) VALUES ($1, 'link_check', 'ok', $2, $3)",
+      [c.id, JSON.stringify({ url: info.finalUrl, status: info.status }), src]);
+    await refreshSearchText(q, c.id);
+  });
+  return Object.keys(updates);
+}
+
 export const HANDLERS: Record<string, Handler> = {
   /** Completa una ficha con los metadatos públicos de su web oficial (sin sobrescribir datos declarados). */
   async enrich_company({ db, job }) {
-    const c = await one<any>(db, 'SELECT id, name, website, description, email, phone, legal_name, address, city, region, postal_code, logo_url, origin, record_status FROM companies WHERE id = $1 AND deleted_at IS NULL', [job.payload.companyId]);
+    const c = await one<any>(db, `SELECT ${ENRICH_COLUMNS} FROM companies WHERE id = $1 AND deleted_at IS NULL`, [job.payload.companyId]);
     if (!c?.website) return { skipped: 'sin web' };
     const src = await sourceId(db, 'website');
     const started = Date.now();
@@ -36,36 +100,99 @@ export const HANDLERS: Record<string, Handler> = {
       const info = await fetchSiteInfo(c.website);
       await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, results, job_id) VALUES ($1,'enrich',$2,'ok',$3,$4,1,$5)`,
         [src, c.website, info.status, Date.now() - started, job.id]);
-      const updates: Record<string, string> = {};
-      const fill = (field: string, value: string | null | undefined) => { if (value && !c[field]) updates[field] = value.slice(0, field === 'description' ? 1000 : 200); };
-      // Para empresas detectadas, el nombre de la web es más fiable que el título del buscador
-      if (c.origin === 'external' && info.name && info.name.length >= 2) updates.name = info.name.slice(0, 150);
-      fill('legal_name', info.legalName); fill('description', info.description); fill('email', info.emails[0]); fill('phone', info.phones[0]);
-      fill('address', info.address?.street); fill('city', info.address?.city); fill('region', info.address?.region); fill('postal_code', info.address?.postalCode);
-      if (info.logo && !c.logo_url && /^https:\/\//.test(info.logo)) updates.logo_url = info.logo;
-      await db.tx(async (q) => {
-        const keys = Object.keys(updates);
-        await q.query(`UPDATE companies SET website_status = $2, website_checked_at = now(), last_checked_at = now()${keys.map((k, i) => `, ${k} = $${i + 3}`).join('')} WHERE id = $1`,
-          [c.id, info.redirected && normalizeDomain(info.finalUrl) !== normalizeDomain(c.website) ? 'redirect' : 'ok', ...keys.map((k) => updates[k])]);
-        for (const k of keys) {
-          await q.query(`INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,$6)`,
-            [c.id, k, updates[k], src, info.finalUrl, c.origin === 'external' ? 'detected' : 'pending_review']);
-        }
-        if (keys.length) await q.query("INSERT INTO company_changes (company_id, change_source, changes) VALUES ($1, 'worker', $2)",
-          [c.id, JSON.stringify(Object.fromEntries(keys.map((k) => [k, { from: c[k] ?? null, to: updates[k] }])))]);
-        await q.query("INSERT INTO verification_events (company_id, kind, result, details, source_id) VALUES ($1, 'link_check', 'ok', $2, $3)",
-          [c.id, JSON.stringify({ url: info.finalUrl, status: info.status }), src]);
-        await refreshSearchText(q, c.id);
-      });
-      return { updated: Object.keys(updates) };
+      const rendered = looksEmpty(info) ? await renderWithFirecrawl(db, job.id, c.website) : null;
+      return { updated: await applySiteInfo(db, c, rendered ?? info, src), ...(rendered ? { rendered: true } : {}) };
     } catch (e) {
       const se = e as SourceError;
       await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, error, job_id) VALUES ($1,'enrich',$2,$3,$4,$5,$6,$7)`,
         [src, c.website, se.kind === 'timeout' ? 'timeout' : se.kind === 'blocked' ? 'blocked' : 'error', se.httpStatus ?? null, Date.now() - started, se.message, job.id]);
+      // Bloqueo antibots (HTTP 401/403/429), no de robots.txt: se intenta leer con Firecrawl, que también respeta robots.txt
+      const rendered = se.kind === 'blocked' && se.httpStatus ? await renderWithFirecrawl(db, job.id, c.website) : null;
+      if (rendered) return { updated: await applySiteInfo(db, c, rendered, src), rendered: true };
       await db.query('UPDATE companies SET website_status = $2, website_checked_at = now() WHERE id = $1', [c.id, se.kind === 'blocked' ? 'blocked' : 'broken']);
       if (se.kind === 'blocked') return { skipped: se.message };     // robots.txt o dirección no pública: no se reintenta
       throw e;
     }
+  },
+
+  /**
+   * Empresas que llegan sin web (GLEIF y similares): busca su web oficial (Wikidata por LEI, dominios probables
+   * y, si hay clave, Firecrawl o Brave Search) y, si la encuentra y la comprueba, guarda web, email y teléfono.
+   */
+  async discover_website({ db, job, deadline }) {
+    const c = await one<any>(db, `SELECT ${ENRICH_COLUMNS}, lei, country_code, website_discovered_at FROM companies WHERE id = $1 AND deleted_at IS NULL`, [job.payload.companyId]);
+    if (!c) return { skipped: 'no existe' };
+    if (c.website) return { skipped: 'ya tiene web' };
+    const [webSrc, wdSrc] = await Promise.all([sourceId(db, 'website'), sourceId(db, 'wikidata')]);
+    const cfg = await getSetting(db, 'website_discovery');
+    // Buscador web: el primero utilizable (Firecrawl, luego Brave)
+    let search: { adapter: SearchAdapter; src: PaidSource } | null = null;
+    if (cfg.use_web_search) {
+      for (const adapter of [firecrawl, brave]) {
+        const src = await usablePaidSource(db, adapter);
+        if (src) { search = { adapter, src }; break; }
+      }
+    }
+    const attempts: DiscoverAttempt[] = [];
+    const started = Date.now();
+    const found = await discoverWebsite({ name: c.name, legalName: c.legal_name, lei: c.lei, city: c.city, countryCode: c.country_code }, {
+      fetchSite: (url) => fetchSiteInfo(url, 7000),
+      wikidataByLei: wdSrc ? (lei) => wikidataByLei(lei, 7000) : undefined,
+      webSearch: search ? async (query, country) => {
+        const { adapter, src } = search!;
+        const t0 = Date.now();
+        try {
+          const r = await adapter.search(query, { limit: 8, country, timeoutMs: 8000 });
+          await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, http_status, attempts, duration_ms, results, cost_usd, job_id) VALUES ($1,'enrich',$2,'ok',$3,$4,$5,$6,$7,$8)`,
+            [src.id, query.slice(0, 300), r.httpStatus, r.attempts, Date.now() - t0, r.hits.length, Number(src.cost_per_1000_usd) / 1000 * r.billableRequests, job.id]);
+          return r.hits;
+        } catch (e) {
+          await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, http_status, duration_ms, error, job_id) VALUES ($1,'enrich',$2,'error',$3,$4,$5,$6)`,
+            [src.id, query.slice(0, 300), (e as SourceError).httpStatus ?? null, Date.now() - t0, (e as Error).message?.slice(0, 500), job.id]);
+          throw e;
+        }
+      } : undefined,
+      deadline: Math.min(deadline, Date.now() + cfg.max_seconds_per_company * 1000),
+    }, attempts);
+    await db.query('UPDATE companies SET website_discovered_at = now() WHERE id = $1', [c.id]);
+    if (!found) {
+      if (webSrc) await db.query(`INSERT INTO external_requests (source_id, purpose, query, status, duration_ms, results, error, job_id) VALUES ($1,'enrich',$2,'ok',$3,0,$4,$5)`,
+        [webSrc, `descubrir web: ${c.name}`.slice(0, 300), Date.now() - started, `Sin web comprobada (${attempts.length} intentos)`, job.id]);
+      return { found: false, attempts: attempts.length };
+    }
+    const domain = normalizeDomain(found.website);
+    const dup = domain ? await one<{ id: string; name: string }>(db, 'SELECT id, name FROM companies WHERE domain = $1 AND id <> $2 AND deleted_at IS NULL', [domain, c.id]) : null;
+    if (dup) {
+      await openTask(db, c.id, 'duplicate_candidate', { reason: 'La web encontrada ya pertenece a otra ficha', website: found.website, other: dup }, `dup-web:${c.id}:${dup.id}`, 40);
+      return { found: true, skipped: 'web de otra ficha', website: found.website };
+    }
+    const src = found.method === 'wikidata' ? wdSrc : found.method === 'web_search' ? search?.src.id ?? webSrc : webSrc;
+    await db.tx(async (q) => {
+      await q.query(`UPDATE companies SET website = $2, domain = $3, email = coalesce(email, $4), phone = coalesce(phone, $5) WHERE id = $1`,
+        [c.id, found.website, domain, found.email, found.phone]);
+      for (const [field, value] of [['website', found.website], ['email', found.email], ['phone', found.phone]] as const) {
+        if (value && !(field !== 'website' && c[field])) await q.query("INSERT INTO data_provenance (company_id, field, value, source_id, source_url, status) VALUES ($1,$2,$3,$4,$5,'detected')", [c.id, field, value, src, found.sourceUrl]);
+      }
+      await q.query("INSERT INTO company_changes (company_id, change_source, changes) VALUES ($1, 'worker', $2)",
+        [c.id, JSON.stringify({ website: { from: null, to: found.website, method: found.method }, ...(found.email && !c.email ? { email: { from: null, to: found.email } } : {}), ...(found.phone && !c.phone ? { phone: { from: null, to: found.phone } } : {}) })]);
+      await refreshSearchText(q, c.id);
+    });
+    const fresh = { ...c, website: found.website, email: c.email ?? found.email, phone: c.phone ?? found.phone };
+    let updated: string[] = [];
+    if (found.info) updated = await applySiteInfo(db, fresh, found.info, webSrc);
+    else await enqueue(db, 'enrich_company', { companyId: c.id }, { dedupeKey: `enrich:${c.id}`, priority: 60 });
+    return { found: true, method: found.method, website: found.website, updated };
+  },
+
+  /** Busca la web de las empresas detectadas que aún no tienen (las más recientes primero). */
+  async discover_missing({ db }) {
+    const cfg = await getSetting(db, 'website_discovery');
+    if (!cfg.enabled) return { skipped: 'desactivado' };
+    const rows = await many<{ id: string }>(db, `SELECT id FROM companies WHERE website IS NULL AND website_discovered_at IS NULL AND deleted_at IS NULL
+      AND is_demo = false AND record_status IN ('detected', 'published', 'pending_review') ORDER BY created_at DESC LIMIT $1`, [cfg.batch_size]);
+    let n = 0;
+    for (const r of rows) if (await enqueue(db, 'discover_website', { companyId: r.id }, { dedupeKey: `discover:${r.id}`, priority: 25 })) n++;
+    return { enqueued: n };
   },
 
   /** Verificación en registro abierto (GLEIF). Añade evidencias; "verificada" la decide un administrador. */
@@ -192,6 +319,7 @@ export async function scheduleRecurring(db: Db, now = new Date()) {
     await enqueueOncePerPeriod(db, 'process_supplier_requests', hour),
     await enqueueOncePerPeriod(db, 'check_links', hour),
     await enqueueOncePerPeriod(db, 'flag_stale', day),
+    await enqueueOncePerPeriod(db, 'discover_missing', hour),
     await enqueueOncePerPeriod(db, 'detect_duplicates', day),
     await enqueueOncePerPeriod(db, 'cleanup', day),
   ];

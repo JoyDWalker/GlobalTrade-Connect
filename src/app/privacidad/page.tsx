@@ -22,7 +22,7 @@ export default function Page() {
             <li><strong>Datos técnicos</strong>: dirección IP convertida en un código irreversible (hash) para limitar abusos; se elimina a los 30 días.</li>
           </ul>
           <h2>3. Destinatarios y encargados</h2>
-          <p>Las solicitudes solo se comunican a la empresa destinataria. Proveedores que tratan datos por nuestra cuenta: alojamiento web (Vercel), base de datos y autenticación (Supabase), envío de email (Resend) y, si se activan, APIs de búsqueda. Algunos pueden implicar transferencias internacionales amparadas por cláusulas contractuales tipo o marcos de adecuación. [Revisar con asesoría.]</p>
+          <p>Las solicitudes solo se comunican a la empresa destinataria. Proveedores que tratan datos por nuestra cuenta: alojamiento web (Vercel), base de datos y autenticación (Supabase), envío de email (Resend), analítica de uso sin cookies (PostHog, servidores en la UE) y, si se activan, APIs de búsqueda. Algunos pueden implicar transferencias internacionales amparadas por cláusulas contractuales tipo o marcos de adecuación. [Revisar con asesoría.]</p>
           <h2>4. Conservación</h2>
           <ul>
             <li>Fichas de empresa: mientras estén activas; las eliminadas se ocultan y pueden purgarse a petición.</li>
@@ -35,7 +35,7 @@ export default function Page() {
           <h2>6. Datos incorrectos</h2>
           <p>Cada ficha tiene un enlace «Reportar datos incorrectos». Revisamos los reportes y corregimos u ocultamos la información.</p>
           <h2 id="cookies">7. Cookies</h2>
-          <p>Solo usamos cookies técnicas necesarias para mantener la sesión cuando inicias sesión (cookies de Supabase Auth). No usamos cookies de analítica ni de publicidad, por lo que no se solicita consentimiento de cookies. Si en el futuro se añaden, se pedirá consentimiento previo.</p>
+          <p>Solo usamos cookies técnicas necesarias para mantener la sesión cuando inicias sesión (cookies de Supabase Auth). No usamos cookies de analítica ni de publicidad, por lo que no se solicita consentimiento de cookies. Medimos visitas de forma agregada con PostHog en modo sin cookies: no guarda nada en tu navegador ni crea perfiles personales. Si en el futuro se añaden, se pedirá consentimiento previo.</p>
           <h2>8. Seguridad</h2>
           <p>Conexiones cifradas (HTTPS/TLS), control de acceso por roles en el servidor, registro de acciones sensibles y copias de seguridad cifradas.</p>
         </article>

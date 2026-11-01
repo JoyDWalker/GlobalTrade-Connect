@@ -2,7 +2,7 @@
 // los demás y los datos almacenados siguen funcionando.
 import { env } from '../env';
 import { isGenericDomain, normalizeDomain, rootDomain, truncate } from '../text';
-import { BOT_UA, SourceError, fetchPublicPage, fetchWithRetry } from './http';
+import { BOT_UA, SourceError, assertPublicUrl, fetchPublicPage, fetchWithRetry } from './http';
 import { isAllowedByRobots } from './robots';
 
 export interface CompanyHit {
@@ -108,6 +108,73 @@ export const brave: SearchAdapter = {
   },
 };
 
+// ───────── Firecrawl: búsqueda web y lectura de webs que necesitan JavaScript ─────────
+// Se factura por créditos (búsqueda: 2 por cada 10 resultados; lectura: 1 por página), así que billableRequests
+// son créditos y el coste de la fuente se expresa por 1.000 créditos.
+const FIRECRAWL_API = 'https://api.firecrawl.dev/v2';
+
+async function firecrawlPost(path: string, body: unknown, timeoutMs: number) {
+  const { res, attempts } = await fetchWithRetry(`${FIRECRAWL_API}${path}`, {
+    method: 'POST', timeoutMs, retries: 1,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env().FIRECRAWL_API_KEY}` },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (res.status === 402) throw new SourceError('quota_exceeded', 'Firecrawl: créditos agotados', 402);
+  if (!res.ok) throw statusError('Firecrawl', res.status, text);
+  const data = JSON.parse(text);
+  if (data.success === false) throw new SourceError('http', `Firecrawl: ${String(data.error ?? 'error').slice(0, 200)}`, res.status);
+  return { data, httpStatus: res.status, attempts };
+}
+
+export const firecrawl: SearchAdapter = {
+  key: 'firecrawl',
+  isConfigured: () => Boolean(env().FIRECRAWL_API_KEY),
+  async search(query, { limit, country, timeoutMs }) {
+    const n = Math.min(20, limit);
+    const { data, httpStatus, attempts } = await firecrawlPost('/search', { query, limit: n, ...(country ? { country } : {}), timeout: timeoutMs }, timeoutMs + 2000);
+    const items = (data.data?.web ?? []).map((r: any) => ({ title: r.title ?? '', url: r.url, snippet: r.description, siteName: r.metadata?.ogSiteName }));
+    return { hits: webResultsToHits('firecrawl', items, country), httpStatus, attempts, billableRequests: Number(data.creditsUsed) || 2 * Math.ceil(n / 10) };
+  },
+};
+
+/** Lee una web con Firecrawl (renderiza JavaScript). Se usa cuando la descarga directa no trae contenido. */
+export async function firecrawlSiteInfo(website: string, timeoutMs = 20000): Promise<{ info: SiteInfo; credits: number; httpStatus: number }> {
+  const url = await assertPublicUrl(website);
+  if (!(await robotsAllows(url, timeoutMs))) throw new SourceError('blocked', 'robots.txt no permite rastrear esta página');
+  const scrape = async (u: string) => {
+    const { data } = await firecrawlPost('/scrape', { url: u, formats: ['rawHtml'], timeout: timeoutMs }, timeoutMs + 2000);
+    const page = data.data ?? {};
+    const status = Number(page.metadata?.statusCode) || 200;
+    return { html: String(page.rawHtml ?? ''), finalUrl: String(page.metadata?.url ?? page.metadata?.sourceURL ?? u), status, credits: Number(data.creditsUsed) || 1 };
+  };
+  const home = await scrape(url.toString());
+  if (home.status >= 400) throw new SourceError(home.status === 401 || home.status === 403 ? 'blocked' : 'http', `La web respondió HTTP ${home.status}`, home.status);
+  const info = parseSite(home.html, home.finalUrl);
+  let credits = home.credits;
+  // Una sola página de contacto como máximo: cada lectura cuesta un crédito
+  const link = info.emails.length && info.phones.length ? null : contactLinks(home.html, home.finalUrl)[0];
+  if (link && (await robotsAllows(new URL(link), timeoutMs))) {
+    try {
+      const p = await scrape(link);
+      credits += p.credits;
+      if (p.status < 400) {
+        const extra = parseSite(p.html, p.finalUrl);
+        info.emails = cleanEmails([...info.emails, ...extra.emails], normalizeDomain(home.finalUrl));
+        info.phones = cleanPhones([...info.phones, ...extra.phones]);
+        info.address ??= extra.address;
+        info.legalName ??= extra.legalName;
+      }
+    } catch { /* la página de contacto es opcional */ }
+  }
+  return { info: { finalUrl: home.finalUrl, status: home.status, redirected: home.finalUrl !== url.toString(), ...info }, credits, httpStatus: home.status };
+}
+
+/** ¿La descarga directa trajo tan poco que la web probablemente se pinta con JavaScript? */
+export function looksEmpty(info: Pick<SiteInfo, 'text' | 'emails' | 'phones'>) {
+  return !info.emails.length && !info.phones.length && info.text.replace(/\s+/g, ' ').trim().length < 300;
+}
+
 
 // ───────── GLEIF: registro mundial de entidades legales (LEI), datos abiertos CC0 ─────────
 export interface RegistryRecord { lei: string; legalName: string; country: string | null; city: string | null; address: string | null; postalCode: string | null; status: string; registeredAs: string | null; url: string }
@@ -141,6 +208,8 @@ export interface SiteInfo {
   name: string | null; description: string | null; legalName: string | null; logo: string | null;
   emails: string[]; phones: string[]; address: { street?: string; city?: string; region?: string; postalCode?: string; country?: string } | null;
   sameAs: string[];
+  /** Título y texto visible de la portada (recortado), para comprobar que la web es de la empresa buscada. */
+  text: string;
 }
 
 const decode = (s: string) => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').trim();
@@ -185,7 +254,7 @@ export function parseSite(html: string, pageUrl: string): Omit<SiteInfo, 'finalU
   const domain = normalizeDomain(pageUrl);
   const out: Omit<SiteInfo, 'finalUrl' | 'status' | 'redirected'> = {
     name: meta(html, 'property', 'og:site_name'), description: meta(html, 'name', 'description') ?? meta(html, 'property', 'og:description'),
-    legalName: null, logo: null, emails: [], phones: [], address: null, sameAs: [],
+    legalName: null, logo: null, emails: [], phones: [], address: null, sameAs: [], text: '',
   };
   const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
   if (!out.name && title) out.name = companyNameFromTitle(decode(title), domain);
@@ -212,6 +281,7 @@ export function parseSite(html: string, pageUrl: string): Omit<SiteInfo, 'finalU
   for (const m of html.matchAll(/href=["']tel:([+\d\s().%-]{6,30})["']/gi)) { try { out.phones.push(decodeURIComponent(m[1]).trim()); } catch { /* */ } }
   // Texto visible: emails y teléfonos escritos en la página (pie, página de contacto, aviso legal…)
   const text = visibleText(html);
+  out.text = `${title ? decode(title) : ''} ${out.description ?? ''} ${text}`.replace(/\s+/g, ' ').slice(0, 30_000);
   for (const m of text.matchAll(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi)) out.emails.push(m[0]);
   for (const m of text.matchAll(/(?:tel(?:[ée]fono|efone|ephone)?|phone|fono|t\.|call|llámanos|llamenos)\s*[.:]?\s*((?:\+|00)?[\d][\d\s().\/-]{6,22}\d)/gi)) out.phones.push(m[1]);
   for (const m of text.matchAll(/(?<![\w\d])\+\d{1,3}[\s.-]?\(?\d{1,4}\)?(?:[\s.-]?\d{2,4}){2,4}(?![\w\d])/g)) out.phones.push(m[0]);

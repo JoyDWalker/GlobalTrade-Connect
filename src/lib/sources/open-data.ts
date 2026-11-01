@@ -139,3 +139,20 @@ export const wikidataSearch: SearchAdapter = {
     return { hits, httpStatus: 200, attempts, billableRequests: 0 };
   },
 };
+
+/** Web, email y teléfono de una entidad en Wikidata a partir de su código LEI (propiedad P1278). */
+export async function wikidataByLei(lei: string, timeoutMs = 8000): Promise<{ qid: string; website: string | null; email: string | null; phone: string | null } | null> {
+  const { data } = await wd({ action: 'query', list: 'search', srsearch: `haswbstatement:P1278=${lei}`, srlimit: '1' }, timeoutMs);
+  const qid = data?.query?.search?.[0]?.title as string | undefined;
+  if (!qid) return null;
+  const r = await wd({ action: 'wbgetentities', ids: qid, props: 'claims' }, timeoutMs);
+  const e = r.data?.entities?.[qid];
+  const website = (claimValues(e, 'P856')[0] as string | undefined) ?? null;
+  const email = String(claimValues(e, 'P968')[0] ?? '').replace(/^mailto:/i, '').trim().toLowerCase() || null;
+  const phone = String(claimValues(e, 'P1329')[0] ?? '').trim() || null;
+  return {
+    qid, website,
+    email: email && /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(email) ? email : null,
+    phone: phone && /^[+()\d\s.-]{6,40}$/.test(phone) ? phone : null,
+  };
+}

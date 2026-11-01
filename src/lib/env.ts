@@ -20,6 +20,7 @@ const schema = z.object({
   GOOGLE_CSE_API_KEY: optional,
   GOOGLE_CSE_ENGINE_ID: optional,
   BRAVE_SEARCH_API_KEY: optional,
+  FIRECRAWL_API_KEY: optional,
 
   EMAIL_PROVIDER: z.enum(['log', 'resend']).default('log'),
   RESEND_API_KEY: optional,

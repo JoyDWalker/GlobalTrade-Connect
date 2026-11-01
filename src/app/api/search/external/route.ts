@@ -6,8 +6,7 @@ import { getSessionUser } from '@/lib/auth/session';
 import { hit } from '@/lib/rate-limit';
 import { runExternalSearch } from '@/lib/search/external';
 import { after } from 'next/server';
-import { runWorker } from '@/lib/jobs/worker';
-import { log } from '@/lib/logger';
+import { processContactJobs, queueWebsiteDiscovery } from '@/lib/services/discovery';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -25,15 +24,9 @@ export const POST = api(async ({ req, ipHash }) => {
     if (r.items.length) await db.query(`INSERT INTO search_results (search_id, company_id, rank, origin) SELECT $1, id, 1000 + ord, 'external'
       FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, ord) ON CONFLICT DO NOTHING`, [body.searchId, r.items.map((c) => c.id)]);
   }
-  // Tras responder, se visitan ya las webs de las empresas nuevas para obtener su email y teléfono
-  // (no hace falta esperar al proceso programado)
-  if (r.newCompanies > 0) {
-    after(async () => {
-      try {
-        const w = await runWorker(db, { timeBudgetMs: 45_000, schedule: false, types: ['enrich_company'], maxJobs: 20, workerId: `after-search:${body.searchId ?? 'x'}` });
-        log.info('Webs visitadas tras la búsqueda', { processed: w.processed.length, failed: w.processed.filter((p) => !p.ok).length });
-      } catch (e) { log.warn('No se pudieron visitar las webs tras la búsqueda', { error: e }); }
-    });
-  }
+  // Tras responder: se busca la web de las empresas que no la tienen (GLEIF…) y se visitan las webs para obtener
+  // email y teléfono, sin esperar al proceso programado. La próxima vez que se abra la ficha ya aparecen.
+  const queued = await queueWebsiteDiscovery(db, r.items.filter((c) => !c.domain).map((c) => c.id)).catch(() => 0);
+  if (r.newCompanies > 0 || queued > 0) after(() => processContactJobs(db, `after-search:${body.searchId ?? 'x'}`, 30));
   return r;
 });

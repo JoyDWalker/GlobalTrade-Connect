@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { after } from 'next/server';
 import { getDb, many } from '@/lib/db';
 import { canManageCompany, getSessionUser } from '@/lib/auth/session';
 import { companyCards, companyDetail, isPubliclyVisible } from '@/lib/services/companies';
 import { safeUrl } from '@/lib/text';
+import { processContactJobs, queueWebsiteDiscovery } from '@/lib/services/discovery';
 import { CompanyCard, Flag, fmtDate, Logo, StatusBadge, VerificationBadge } from '@/components/ui';
 import { Icon } from '@/components/icons';
 import { CompanyActions, ContactCard, ReportLink } from './company-client';
@@ -44,6 +46,15 @@ export default async function CompanyPage({ params }: { params: Params }) {
   const services = c.offerings.filter((o: any) => o.kind === 'service');
   const publicEmail = c.email || c.contacts.find((k: any) => k.email)?.email || null;
   const isDetected = c.record_status === 'detected';
+  // Ficha sin web ni contactos: se busca su web oficial en segundo plano (una sola vez por empresa)
+  const noContact = !c.website && !publicEmail && !c.phone && !c.contacts.some((k: any) => k.phone || k.whatsapp);
+  let searchingContact = false;
+  if (noContact && !c.is_demo && !c.website_discovered_at) {
+    searchingContact = (await queueWebsiteDiscovery(db, [c.id], 70).catch(() => 0)) > 0
+      || Boolean(await many(db, "SELECT 1 FROM jobs WHERE dedupe_key = $1 AND status IN ('queued', 'running')", [`discover:${c.id}`]).then((r) => r.length).catch(() => 0));
+    if (searchingContact) after(() => processContactJobs(db, `company-page:${c.id}`, 3, 40_000));
+  }
+  const webSearchQuery = [`"${c.legal_name || c.name}"`, c.city, c.country_name].filter(Boolean).join(' ');
 
   return (
     <div className="wrap">
@@ -131,7 +142,7 @@ export default async function CompanyPage({ params }: { params: Params }) {
         </div>
 
         <aside>
-          <ContactCard company={{ id: c.id, slug: c.slug, name: c.name, products: c.offerings.map((o: any) => o.name) }} contacts={c.contacts} email={c.email} phone={c.phone} website={site} social={social} hasPrivate={c.has_private_contacts} detected={isDetected} />
+          <ContactCard company={{ id: c.id, slug: c.slug, name: c.name, products: c.offerings.map((o: any) => o.name) }} contacts={c.contacts} email={c.email} phone={c.phone} website={site} social={social} hasPrivate={c.has_private_contacts} detected={isDetected} searching={searchingContact} webSearchQuery={noContact ? webSearchQuery : null} />
           <div className="card card-pad">
             <h3>Ubicación y cobertura</h3>
             <div className="contact-line"><Icon name="pin" /><span className="grow">{c.address ?? c.city ?? '—'}<br /><span className="muted small">{[c.postal_code, c.city, c.region, c.country_name].filter(Boolean).join(', ')}</span></span></div>
